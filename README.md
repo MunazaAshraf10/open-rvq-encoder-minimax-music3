@@ -154,8 +154,7 @@ reads 128 frame windows from it. Only records with an exact stitching table are 
 ## Benchmarks
 
 Measured on an RTX 3090 (sm_86, 23.6 GiB, driver 580.173.02), torch 2.14 on CUDA 13, Python 3.13,
-bf16 autocast and tf32; median device time, peak allocation of the measured region. Full tables,
-method and interpretation are in docs/benchmarks.md; regenerate everything with
+bf16 autocast and tf32; median device time, peak allocation of the measured region. Regenerate everything with
 
     uv run rvq-ae bench --device cuda --suite all
 
@@ -173,8 +172,7 @@ method and interpretation are in docs/benchmarks.md; regenerate everything with
 
 The released weights were re evaluated by this implementation on the 130 exact alignment holdout
 tracks (2,768 windows, dataset revision 5029b1e7) on one RTX 3090. Every published row is
-reproduced within 0.003 in loss and 0.001 in accuracy; the full comparison, protocols and
-provenance are in docs/evaluation.md, the raw rows under results/.
+reproduced within 0.003 in loss and 0.001 in accuracy.
 
 | Model | Source | Loss | Semantic top 1 | Semantic top 5 | Acoustic top 1 | Acoustic top 5 |
 |---|---|---:|---:|---:|---:|---:|
@@ -283,7 +281,6 @@ Two details differ from the published inference adapter and are chosen deliberat
       bench/         timing harness and the benchmark suites
     tests/           pytest suite (CPU, plus CUDA cases when a device is present)
     configs/         training configurations
-    docs/            formulas, dataset, training, evaluation, benchmarks
 
 ## Testing
 
@@ -299,12 +296,6 @@ are transparent: the segment pooling operator equals the dense matrix to machine
 float64, and the fused attention kernel matches the unfused reference to the resolution of the
 dtype. Cases that need a GPU are skipped when none is present. tests/test_style.py enforces the
 repository conventions, so they cannot drift.
-
-## Documentation and paper
-
-docs/formulas.md gives every formula with its source location, docs/dataset.md the corpus,
-docs/training.md the four published recipes and their equivalents here, docs/evaluation.md the
-protocols with published and reproduced results, and docs/benchmarks.md the measurements.
 
 ## Links
 
