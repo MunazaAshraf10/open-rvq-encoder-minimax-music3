@@ -205,7 +205,9 @@ Push a trained checkpoint to the Hub:
 The v4 release was trained for 17,660 optimizer steps (20 epochs, batch 16 per rank on four
 GPUs), AdamW with learning rate 3e-4, weight decay 0.01, 500 warm up steps followed by linear
 decay to 1e-7, gradient clipping at 1.0, bf16 autocast, seed 42. configs/v4_169m.json holds
-these values; configs/v1_41m.json is the 41M baseline. Training resumes bitwise from any
+these values; configs/v1_41m.json is the 41M baseline. configs/v4_169m_single_gpu.json keeps the
+same effective batch of 64 windows on one GPU through gradient accumulation (a 24 GB card such
+as an RTX 3090 is enough; expect roughly ten times the four GPU wall time). Training resumes bitwise from any
 checkpoint folder (weights, optimizer, scheduler and per rank random state are stored).
 
 Two details differ from the published inference adapter and are chosen deliberately:
