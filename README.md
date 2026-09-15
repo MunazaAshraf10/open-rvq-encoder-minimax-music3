@@ -263,7 +263,7 @@ and that resuming a run reproduces an uninterrupted run bitwise.
 ## Citation
 
     @software{ashraf2026rvqae,
-      author = {Ashraf, Munaza and bghira},
+      author = {{Munaza Ashraf} and bghira},
       title = {RVQ AE for MiniMax Music 3: an open audio to RVQ code encoder},
       year = {2026},
       url = {https://github.com/MunazaAshraf10/open-rvq-encoder-minimax-music3}
