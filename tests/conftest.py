@@ -1,10 +1,18 @@
+import io
 import json
+import zipfile
 from pathlib import Path
 
+import numpy as np
 import pytest
+import soundfile
 import torch
+from safetensors.torch import save as save_bytes
 
+from rvq_ae.alignment import nominal_bounds
 from rvq_ae.config import EncoderConfig
+from rvq_ae.data.cache import build_cache
+from rvq_ae.data.records import load_records
 from rvq_ae.dav import DavEncoder
 
 DATA = Path(__file__).parent / "data"
@@ -70,13 +78,6 @@ def write_shard(
     sample_rate: int = 44_100,
 ) -> dict[str, object]:
     """Write one synthetic shard ZIP and return its index entry."""
-    import io
-    import json
-    import zipfile
-
-    import numpy as np
-    import soundfile
-    from safetensors.torch import save as save_bytes
 
     rows = frames + 1
     codes = torch.stack([torch.randint(0, vocab, (rows,)) for vocab in TINY_VOCABS], dim=-1).to(torch.int16)
@@ -98,8 +99,6 @@ def write_shard(
         archive.writestr(f"{shard_id}/prediction.safetensors", save_bytes(tensors))
     stitching = None
     if exact:
-        from rvq_ae.alignment import nominal_bounds
-
         stitching = [
             {
                 "chunk_index": 0,
@@ -139,8 +138,6 @@ def synthetic_cache(
     tmp_path: Path, *, shards: int = 3, seconds: float = 1.0, topk: int = 3
 ) -> tuple[Path, Path]:
     """Corpus with a number of one second tracks (train, train, holdout) and its latent cache."""
-    from rvq_ae.data.cache import build_cache
-    from rvq_ae.data.records import load_records
 
     corpus = tmp_path / "corpus"
     for shard in range(shards):

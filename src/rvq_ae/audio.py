@@ -1,5 +1,3 @@
-"""Waveform decoding and resampling."""
-
 import io
 from pathlib import Path
 

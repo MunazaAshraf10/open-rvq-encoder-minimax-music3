@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from conftest import TINY_VOCABS, tiny_config
+from rvq_ae.alignment import Pool
 from rvq_ae.constants import IGNORE
 from rvq_ae.evaluate import Counter, evaluate
 from rvq_ae.model import RvqEncoder
@@ -24,11 +25,17 @@ class Controlled(RvqEncoder):
         return out
 
 
+def pool() -> Pool:
+    """Four frames of three latents each, batched twice."""
+    single = Pool.of([0, 3, 6, 9, 12])
+    return Pool(frame=single.frame.expand(2, -1), span=single.span.expand(2, -1))
+
+
 def batches(model: Controlled, count: int) -> list[dict[str, Tensor]]:
     return [
         {
             "latents": torch.randn(2, 12, 128),
-            "pool": torch.rand(2, 4, 12),
+            "pool": pool(),
             "target": torch.stack([torch.randint(0, vocab, (2, 4)) for vocab in TINY_VOCABS], dim=-1),
         }
         for index in range(count)
@@ -38,7 +45,7 @@ def batches(model: Controlled, count: int) -> list[dict[str, Tensor]]:
 def test_free_running_and_teacher_forced_metrics_are_separated() -> None:
     model = Controlled()
     model.answers = torch.stack([torch.randint(0, vocab, (2, 4)) for vocab in TINY_VOCABS], dim=-1)
-    batch = {"latents": torch.randn(2, 12, 128), "pool": torch.rand(2, 4, 12), "target": model.answers}
+    batch = {"latents": torch.randn(2, 12, 128), "pool": pool(), "target": model.answers}
     metrics = evaluate(model, [batch], device=torch.device("cpu"))
     assert metrics["semantic_top1"] == 1.0
     assert metrics["teacher_forced_semantic_top1"] == 1.0
@@ -56,7 +63,7 @@ def test_ignored_frames_do_not_count() -> None:
     model.answers = torch.stack([torch.randint(0, vocab, (2, 4)) for vocab in TINY_VOCABS], dim=-1)
     target = model.answers.clone()
     target[0] = IGNORE
-    batch = {"latents": torch.randn(2, 12, 128), "pool": torch.rand(2, 4, 12), "target": target}
+    batch = {"latents": torch.randn(2, 12, 128), "pool": pool(), "target": target}
     metrics = evaluate(model, [batch], device=torch.device("cpu"))
     assert metrics["semantic_top1"] == 1.0
     assert metrics["teacher_forced_acoustic_top1"] == 1.0

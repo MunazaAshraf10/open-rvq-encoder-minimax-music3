@@ -1,19 +1,25 @@
+import json
+from pathlib import Path
+
 import pytest
 import torch
 
 from conftest import TINY_VOCABS, published_config, published_keys, tiny_config
+from rvq_ae.alignment import Pool
 from rvq_ae.config import EncoderConfig
 from rvq_ae.constants import IGNORE
 from rvq_ae.model import RvqEncoder
 
+ROOT = Path(__file__).resolve().parents[1]
 
-def inputs(batch: int = 2, frames: int = 4, latents_per_frame: int = 3) -> tuple[torch.Tensor, torch.Tensor]:
+
+def inputs(batch: int = 2, frames: int = 4, latents_per_frame: int = 3) -> tuple[torch.Tensor, Pool]:
+    """Latents [B, L, 128] and the pooling operator for L latents split evenly over frames."""
     length = frames * latents_per_frame
-    latents = torch.randn(batch, length, 128)
-    pool = torch.zeros(batch, frames, length)
-    for frame in range(frames):
-        pool[:, frame, frame * latents_per_frame : (frame + 1) * latents_per_frame] = 1 / latents_per_frame
-    return latents, pool
+    bounds = list(range(0, length + 1, latents_per_frame))
+    single = Pool.of(bounds)
+    pool = Pool(frame=single.frame.expand(batch, -1), span=single.span.expand(batch, -1))
+    return torch.randn(batch, length, 128), pool
 
 
 def random_codes(batch: int = 2, frames: int = 4) -> torch.Tensor:
@@ -127,3 +133,16 @@ def test_compiled_model_matches_eager(cfg: EncoderConfig) -> None:
     except RuntimeError as error:
         pytest.skip(f"torch.compile unavailable here: {error}")
     assert all(torch.allclose(a, b, atol=1e-4) for a, b in zip(eager, compiled, strict=True))
+
+
+@pytest.mark.parametrize("tag", ["v1", "v2", "v4"])
+def test_published_provenance_counts_match_the_code(tag: str) -> None:
+    """The parameter counts recorded with the released weights are the counts this code builds."""
+    path = ROOT / "results" / "published" / "experiment-summary.json"
+    if not path.is_file():
+        pytest.skip("published results are not checked in")
+    summary = json.loads(path.read_text())
+    recorded = {entry["version"]: entry["parameter_count"] for entry in summary["encoders"]}
+    with torch.device("meta"):
+        model = RvqEncoder(published_config(tag))
+    assert model.parameter_count() == recorded[tag]

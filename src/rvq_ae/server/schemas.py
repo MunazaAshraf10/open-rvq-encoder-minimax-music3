@@ -1,5 +1,3 @@
-"""Request and response models of the HTTP service."""
-
 from pydantic import BaseModel, Field
 
 

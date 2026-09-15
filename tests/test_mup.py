@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from conftest import published_config, tiny_config
+from rvq_ae.alignment import Pool
 from rvq_ae.layers import attention
 from rvq_ae.model import RvqEncoder
 from rvq_ae.mup import Readout, no_decay, param_groups, wide, wide_fan_in
@@ -106,7 +107,8 @@ def test_attention_scale_is_one_over_head_dim_under_mup() -> None:
 
 def test_initial_logit_scale_is_stable_across_widths() -> None:
     latents = torch.randn(4, 8, 128)
-    pool = torch.eye(8).unsqueeze(0).repeat(4, 1, 1)
+    single = Pool.of(list(range(9)))
+    pool = Pool(frame=single.frame.expand(4, -1), span=single.span.expand(4, -1))
     stds = []
     for width in (32, 64, 128):
         torch.manual_seed(3)

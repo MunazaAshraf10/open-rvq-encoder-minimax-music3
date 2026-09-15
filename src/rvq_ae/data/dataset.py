@@ -1,5 +1,3 @@
-"""Fixed length frame windows read from the latent cache."""
-
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -11,7 +9,7 @@ from safetensors import safe_open
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from rvq_ae.alignment import frame_bounds, pool_matrix, usable_frames
+from rvq_ae.alignment import Pool, frame_bounds, usable_frames
 from rvq_ae.constants import IGNORE, WINDOW
 from rvq_ae.data.cache import cache_paths, read_meta
 from rvq_ae.data.records import Record
@@ -19,7 +17,7 @@ from rvq_ae.data.records import Record
 
 class Sample(TypedDict):
     latents: Tensor
-    pool: Tensor
+    pool: Pool
     target: Tensor
     ids: NotRequired[Tensor]
     teacher: NotRequired[Tensor]
@@ -27,7 +25,7 @@ class Sample(TypedDict):
 
 class Batch(TypedDict):
     latents: Tensor
-    pool: Tensor
+    pool: Pool
     target: Tensor
     ids: NotRequired[Tensor]
     teacher: NotRequired[Tensor]
@@ -55,7 +53,12 @@ def check_codes(codes: Tensor, vocabs: Sequence[int], stem: str) -> None:
 
 
 class WindowDataset(Dataset[Sample]):
-    """Windows of size frames with the given stride; random_crop redraws the start every epoch."""
+    """Fixed length frame windows read from the DAV latent cache.
+
+    Windows are size frames long with the given stride; random_crop redraws the start of every
+    window each epoch, deterministically in (seed, epoch, index) so a resumed run sees the same
+    crops as an uninterrupted one.
+    """
 
     def __init__(
         self,
@@ -111,7 +114,7 @@ class WindowDataset(Dataset[Sample]):
         with safe_open(tensors, framework="pt", device="cpu") as handle:
             latents = handle.get_slice("latents")[bounds[0] : bounds[-1]].float()
             target = handle.get_slice("codes")[rows].long()
-            sample: Sample = {"latents": latents, "pool": pool_matrix(bounds), "target": target}
+            sample: Sample = {"latents": latents, "pool": Pool.of(bounds), "target": target}
             if self.need_topk:
                 sample["ids"] = handle.get_slice("teacher_topk_ids")[rows].long()
                 sample["teacher"] = handle.get_slice("teacher_topk_logits")[rows].float()
@@ -120,14 +123,20 @@ class WindowDataset(Dataset[Sample]):
 
 
 def collate(samples: Sequence[Sample]) -> Batch:
-    """Right pad latents and pool columns with zeros so every window keeps its exact spans."""
+    """Right pad latents with zeros; padded columns are sent to the pooling sink row.
+
+    Every window in a batch has the same frame count, so the spans stack directly and only the
+    latent axis needs padding. Padded latents carry index T, which Pool.apply discards.
+    """
     length = max(sample["latents"].shape[0] for sample in samples)
+    frames = samples[0]["pool"].span.shape[0]
     latents = torch.zeros(len(samples), length, samples[0]["latents"].shape[1])
-    pool = torch.zeros(len(samples), samples[0]["pool"].shape[0], length)
+    frame = torch.full((len(samples), length), frames, dtype=torch.int64)
     for row, sample in enumerate(samples):
         count = sample["latents"].shape[0]
         latents[row, :count] = sample["latents"]
-        pool[row, :, :count] = sample["pool"]
+        frame[row, :count] = sample["pool"].frame[:count]
+    pool = Pool(frame=frame, span=torch.stack([sample["pool"].span for sample in samples]))
     batch: Batch = {"latents": latents, "pool": pool, "target": torch.stack([s["target"] for s in samples])}
     with_topk = [("ids" in sample) for sample in samples]
     if any(with_topk):

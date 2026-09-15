@@ -1,5 +1,3 @@
-"""Waveform to RVQ codes: DAV encoder, windowed pooling and greedy decoding."""
-
 import math
 from dataclasses import dataclass
 from typing import Self
@@ -7,7 +5,7 @@ from typing import Self
 import torch
 from torch import Tensor
 
-from rvq_ae.alignment import nominal_bounds, pool_matrix, usable_frames
+from rvq_ae.alignment import Pool, nominal_bounds, usable_frames
 from rvq_ae.audio import resample
 from rvq_ae.constants import COLLECTION, DAV_REPO, FRAME_RATE, MAX_FRAMES, RATE_DEN, RATE_NUM, WINDOW
 from rvq_ae.dav import DavEncoder, load_dav
@@ -60,6 +58,8 @@ def frames_for_latents(latent_frames: int) -> int:
 
 
 class CodeEncoder:
+    """Waveform to RVQ codes: DAV encoder, windowed pooling and greedy decoding."""
+
     def __init__(self, dav: DavEncoder, model: RvqEncoder, *, device: torch.device) -> None:
         self.dav = dav.to(device).eval()
         self.model = model.to(device).eval()
@@ -107,9 +107,9 @@ class CodeEncoder:
         confidence: list[Tensor] = []
         candidates: list[Tensor] = []
         for start, end in windows(frames, self.window):
-            pool = pool_matrix(bounds[start : end + 1]).to(self.device)
+            pool = Pool.of(bounds[start : end + 1]).batched().to(self.device)
             window = latents[bounds[start] : bounds[end]]
-            logits = self.model(window[None], pool[None])
+            logits = self.model(window[None], pool)
             probs = [torch.softmax(scores[0].float(), dim=-1) for scores in logits]
             best = [prob.max(dim=-1) for prob in probs]
             codes.append(torch.stack([item.indices for item in best], dim=-1))

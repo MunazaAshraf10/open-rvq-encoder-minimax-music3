@@ -1,13 +1,3 @@
-"""Encoder half of the MiniMax Music 3 DAV autoencoder (a DAC style codec front end).
-
-Kumar et al., High Fidelity Audio Compression with Improved RVQGAN (2023) describe the block
-layout; the Snake activation is from Ziyin et al., Neural Networks Fail to Learn Periodic
-Functions and How to Fix It (2020). Only the encoder and the posterior mean projection are
-kept: the encoder maps mono audio at 44.1 kHz to 1024 channels at hop 512, the mean projection
-reduces those to 64 channels, and stereo input is encoded channel by channel and concatenated
-into the 128 channel latent (left channels first).
-"""
-
 import json
 import math
 from collections.abc import Mapping
@@ -27,7 +17,10 @@ CONFIG_FILE = "audio_vae/config.json"
 
 
 class Snake(nn.Module):
-    """x + sin^2(alpha x) / alpha with a learned per channel frequency alpha."""
+    """x + sin^2(alpha x) / alpha with a learned per channel frequency alpha.
+
+    Ziyin et al., Neural Networks Fail to Learn Periodic Functions and How to Fix It (2020).
+    """
 
     def __init__(self, channels: int) -> None:
         super().__init__()
@@ -75,6 +68,15 @@ def enc_block(dim: int, stride: int) -> Stack:
 
 
 class DavEncoder(nn.Module):
+    """Encoder half of the MiniMax Music 3 DAV autoencoder, frozen input stage of this work.
+
+    The block layout follows the Descript Audio Codec (Kumar et al., High Fidelity Audio
+    Compression with Improved RVQGAN, 2023). Only the encoder and the posterior mean projection are
+    kept: mono audio at 44.1 kHz maps to 1024 channels at hop 512, the mean projection reduces those
+    to 64, and stereo is encoded channel by channel and concatenated into the 128 channel latent,
+    left channels first.
+    """
+
     def __init__(
         self,
         dim: int = 64,

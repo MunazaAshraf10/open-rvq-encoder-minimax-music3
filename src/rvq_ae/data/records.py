@@ -1,11 +1,3 @@
-"""Records of the reverse distillation dataset.
-
-The Hub dataset stores one generated track per ZIP shard and describes shards in JSONL index
-files. Each index entry carries the shard path and a manifest with exactly one job: the audio
-and tensor member names, the emitted frame count, the codebook sizes and the alignment metadata
-(the priming row offset and, for exact shards, the chunk stitching table).
-"""
-
 import json
 import re
 from collections.abc import Iterator, Mapping

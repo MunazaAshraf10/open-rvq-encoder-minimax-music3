@@ -1,14 +1,6 @@
-"""Timeline contract between DAV latents (86.13 Hz) and RVQ frames (25 Hz).
-
-MiniMax Music 3 renders a track in 200 frame chunks with a 100 frame hop and stitches
-the resulting DAV latents with a 345 latent hop. Frame t therefore maps to a variable
-length latent span [s_t, e_t) rather than a fixed 3.4453125 latent stride. Every function
-here returns or consumes the n + 1 boundaries s_0 <= s_1 <= ... <= s_n.
-"""
-
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import Any, NamedTuple, Self
 
 import torch
 from torch import Tensor
@@ -100,7 +92,13 @@ def stitched_bounds(frames: int, chunks: Sequence[Chunk]) -> list[int]:
 
 
 def frame_bounds(frames: int, chunks: Sequence[Chunk] | None) -> list[int]:
-    """Exact timeline when chunk metadata is present, nominal reconstruction otherwise."""
+    """Boundaries s_0 <= s_1 <= ... <= s_n of the frame to latent timeline.
+
+    MiniMax Music 3 renders a track in 200 frame chunks with a 100 frame hop and stitches the
+    resulting DAV latents with a 345 latent hop, so frame t covers a variable span [s_t, s_(t+1))
+    of three or four latents rather than a fixed 441 / 128 = 3.4453125 stride. The exact timeline
+    is used when the dataset records the chunk stitching table, the nominal reconstruction otherwise.
+    """
     if chunks:
         return stitched_bounds(frames, chunks)
     return nominal_bounds(frames)
@@ -114,16 +112,19 @@ def usable_frames(frames: int, latent_frames: int, chunks: Sequence[Chunk] | Non
     return count
 
 
-def pool_matrix(bounds: Sequence[int]) -> Tensor:
-    """Mean pooling operator P with P[t, l] = 1 / (e_t - s_t) for l in [s_t, e_t).
+def pool_matrix(bounds: Sequence[int], dtype: torch.dtype = torch.float32) -> Tensor:
+    """Mean pooling operator P with P[t, l] = 1 / (s_(t+1) - s_t) for l in [s_t, s_(t+1)).
 
-    Latent indices are local to bounds[0], so the caller slices latents [bounds[0], bounds[-1]).
+    Every row sums to one, so the pooled feature of a frame is the mean of the latent features it
+    was rendered from. This is the published definition of the operator; Pool.of computes the same
+    result in linear time and is what the model actually runs. Latent indices are local to
+    bounds[0], so the caller slices latents [bounds[0], bounds[-1]).
     """
     if len(bounds) < 2:
         raise ValueError("at least two boundaries are required")
     origin = bounds[0]
     length = bounds[-1] - origin
-    pool = torch.zeros(len(bounds) - 1, length)
+    pool = torch.zeros(len(bounds) - 1, length, dtype=dtype)
     for frame in range(len(bounds) - 1):
         start = bounds[frame] - origin
         end = bounds[frame + 1] - origin
@@ -133,7 +134,63 @@ def pool_matrix(bounds: Sequence[int]) -> Tensor:
     return pool
 
 
+class Pool(NamedTuple):
+    """Segment form of the pooling operator P: which frame owns each latent, and how many it owns.
+
+    Applying P as a dense [T, L] matrix product costs O(T L d); because every row of P is a
+    contiguous constant block, the same result is a segment mean that costs O(L d). frame holds the
+    owning frame of every latent and span holds s_(t+1) - s_t, so
+
+        sum[b, frame[b, l]] += hidden[b, l];   pooled = sum / span.
+
+    Right padded latents carry frame T, a sink row that is discarded, which is what lets collate
+    pad a batch with zeros without disturbing any frame. A NamedTuple of tensors survives DataLoader
+    collation, pin_memory and torch.compile unchanged.
+    """
+
+    frame: Tensor
+    span: Tensor
+
+    @classmethod
+    def of(cls, bounds: Sequence[int], length: int | None = None) -> Self:
+        """Build from the n + 1 boundaries of one window, padded out to length latents."""
+        if len(bounds) < 2:
+            raise ValueError("at least two boundaries are required")
+        frames = len(bounds) - 1
+        origin = bounds[0]
+        span = torch.tensor(bounds[1:], dtype=torch.float32) - torch.tensor(bounds[:-1], dtype=torch.float32)
+        if bool((span <= 0).any()):
+            empty = int((span <= 0).nonzero()[0])
+            raise ValueError(f"frame {empty} has an empty latent span")
+        covered = bounds[-1] - origin
+        total = covered if length is None else length
+        if total < covered:
+            raise ValueError(f"length {total} is shorter than the {covered} latents the frames cover")
+        frame = torch.full((total,), frames, dtype=torch.int64)
+        frame[:covered] = torch.repeat_interleave(
+            torch.arange(frames, dtype=torch.int64), span.to(torch.int64)
+        )
+        return cls(frame=frame, span=span)
+
+    def batched(self) -> Self:
+        """Add a leading batch dimension so a single window can be applied to a [1, L, d] tensor."""
+        return type(self)(frame=self.frame.unsqueeze(0), span=self.span.unsqueeze(0))
+
+    def to(self, device: torch.device) -> Self:
+        return type(self)(
+            frame=self.frame.to(device, non_blocking=True), span=self.span.to(device, non_blocking=True)
+        )
+
+    def apply(self, hidden: Tensor) -> Tensor:
+        """Pooled frame features [B, T, d] from latent features [B, L, d]."""
+        batch, dim = hidden.shape[0], hidden.shape[-1]
+        frames = self.span.shape[-1]
+        sums = hidden.new_zeros(batch, frames + 1, dim)
+        sums.scatter_add_(1, self.frame.unsqueeze(-1).expand(-1, -1, dim), hidden)
+        return sums[:, :frames] / self.span.unsqueeze(-1)
+
+
 def frame_centers(bounds: Sequence[int]) -> Tensor:
-    """Center time of every frame in seconds: (s_t + e_t) / 2 * hop / sample_rate."""
+    """Center time of every frame in seconds: (s_t + s_(t+1)) / 2 * hop / sample_rate."""
     edges = torch.tensor(bounds, dtype=torch.float64)
     return (edges[:-1] + edges[1:]) / 2 * HOP / SAMPLE_RATE

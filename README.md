@@ -40,10 +40,9 @@ Exact token agreement of v4 on the held out split (step 17,500):
 | acoustic top 1 | 7.30% | 18.42% |
 | acoustic top 5 | 19.88% | 44.54% |
 
-This implementation reproduces those figures: on a held out track it scores 43.5% semantic
-top 1, 81.2% semantic top 5, 19.4% teacher forced and 7.1% free running acoustic top 1 with the
-released v4 weights, and the re-encoded DAV latents match the generator's stored latents with
-0.986 mean cosine at zero lag.
+This implementation reproduces those figures on the full holdout (see Reproduced evaluation
+below), and the re encoded DAV latents match the generator's stored latents with 0.986 mean
+cosine at zero lag.
 
 Exact agreement is a weak proxy. The code space is redundant: different code tuples map to
 nearly the same downstream condition, which is why v4 improves replay cosine by 0.10 while
@@ -56,7 +55,7 @@ statistics are published with the weights (see Links).
       -> DAV encoder (frozen): 1024 channels at hop 512, posterior mean 64 channels per side
       -> latents [L, 128] at 86.1328125 Hz
       -> conv stem and three dilated residual blocks at latent rate
-      -> mean pooling with the per track matrix P [T, L] onto 25 Hz frames
+      -> mean pooling with the per track operator P onto 25 Hz frames
       -> learned frame positions, eight bidirectional pre norm transformer layers
       -> semantic logits (codebook 0)
       -> causal depth decoder: acoustic codebook k given the frame context,
@@ -77,7 +76,9 @@ alignment module computes the n + 1 boundaries of a track and the pooling operat
 $$P_{t,l} = \frac{1}{e_t - s_t} \quad \text{for } l \in [s_t, e_t), \qquad 0 \text{ otherwise},$$
 
 so that every row of P sums to one and the pooled feature of a frame is the mean of the
-latent features it was rendered from.
+latent features it was rendered from. Every row of P is a contiguous constant block, so the model
+evaluates it as a segment mean in O(L d) rather than as a dense product in O(T L d); the dense
+matrix remains as the definition the tests check the segment form against.
 
 When the dataset records the chunk stitching table, boundaries come from it exactly: chunk 0
 owns frames [f_0, f_1 + 25), chunk i owns [f_i + 25, f_{i+1} + 25), the last chunk owns
@@ -107,7 +108,9 @@ Component sizes of the recommended v4 configuration (width d = 1,088, 17 heads o
 | depth decoder (context projection, prior embeddings, two causal layers, seven heads) | 22,078,464 |
 | total | 169,008,576 |
 
-The depth decoder runs independently for each frame over the sequence
+The temporal stack runs fused scaled dot product attention, which on Ampere selects a Flash or
+memory efficient kernel; the depth decoder runs the unfused path, which is measurably faster at its
+sequence length of 8 (see Benchmarks). The depth decoder runs independently for each frame over the sequence
 [context, e_0(c_0), e_1(c_1), ..., e_6(c_6)] with learned depth positions and a causal mask.
 Head j reads position j + 1 and predicts acoustic codebook j + 1. Training teacher forces the
 sampled codes; inference feeds back greedy predictions. State dict keys match the published
@@ -148,6 +151,38 @@ Music 3 with their sampled codes, teacher top 50 ids and logits, and the chunk s
 (about 178 GB). Waveforms are encoded once through the DAV encoder into a latent cache; training
 reads 128 frame windows from it. Only records with an exact stitching table are used.
 
+## Benchmarks
+
+Measured on an RTX 3090 (sm_86, 23.6 GiB, driver 580.173.02), torch 2.14 on CUDA 13, Python 3.13,
+bf16 autocast and tf32; median device time, peak allocation of the measured region. Full tables,
+method and interpretation are in docs/benchmarks.md; regenerate everything with
+
+    uv run rvq-ae bench --device cuda --suite all
+
+| Measurement | Result |
+|---|---:|
+| fused attention on the temporal stack (b16, 17 heads, 128), forward / backward | 3.6x / 2.8x faster than unfused |
+| fused attention at the depth decoder shape (b2048, 8 heads, 8), forward / backward | 2.9x / 3.8x slower, so that stack stays unfused |
+| pooling operator assembly on the host, batch 64 | 152.9 ms dense to 8.5 ms segment index |
+| v4 training step, batch 16, forward and backward | 84.5 ms, 3.8 GiB |
+| v4 single GPU recipe (batch 16 x accumulation 4), one optimizer step | 396 ms, 5.3 GiB; 1.9 h for 17,660 steps |
+| depth decoding, 2,048 frames, teacher forced / free running | 7.4 ms / 30.6 ms |
+| end to end encoding of a 6 minute stereo track | 5.6 s, 64x real time, 4.4 GiB peak |
+
+## Reproduced evaluation
+
+The released weights were re evaluated by this implementation on the 130 exact alignment holdout
+tracks (2,768 windows, dataset revision 5029b1e7) on one RTX 3090. Every published row is
+reproduced within 0.003 in loss and 0.001 in accuracy; the full comparison, protocols and
+provenance are in docs/evaluation.md, the raw rows under results/.
+
+| Model | Source | Loss | Semantic top 1 | Semantic top 5 | Acoustic top 1 | Acoustic top 5 |
+|---|---|---:|---:|---:|---:|---:|
+| v1 | published | 5.3379 | 41.03 | 78.38 | 7.17 | 20.94 |
+| v1 | this repository | 5.3353 | 41.08 | 78.44 | 7.18 | 20.97 |
+| v4 | published | 3.9874 | 43.17 | 80.51 | 7.29 | 19.88 |
+| v4 | this repository | 3.9860 | 43.24 | 80.56 | 7.30 | 19.92 |
+
 ## Installation
 
 Python 3.13 and uv:
@@ -170,6 +205,10 @@ Build the latent cache, then train v4 on four GPUs and score every checkpoint:
     uv run rvq-ae cache --split train --split holdout
     uv run torchrun --nproc_per_node 4 -m rvq_ae train --config configs/v4_169m.json
     uv run rvq-ae evaluate --run output/v4-169m --split holdout
+
+Measure the implementation on the local GPU:
+
+    uv run rvq-ae bench --device cuda --suite all
 
 Serve the model:
 
@@ -206,9 +245,10 @@ The v4 release was trained for 17,660 optimizer steps (20 epochs, batch 16 per r
 GPUs), AdamW with learning rate 3e-4, weight decay 0.01, 500 warm up steps followed by linear
 decay to 1e-7, gradient clipping at 1.0, bf16 autocast, seed 42. configs/v4_169m.json holds
 these values; configs/v1_41m.json is the 41M baseline. configs/v4_169m_single_gpu.json keeps the
-same effective batch of 64 windows on one GPU through gradient accumulation (a 24 GB card such
-as an RTX 3090 is enough; expect roughly ten times the four GPU wall time). Training resumes bitwise from any
-checkpoint folder (weights, optimizer, scheduler and per rank random state are stored).
+same effective batch of 64 windows on one GPU through gradient accumulation; on an RTX 3090 a step
+takes 396 ms and peaks at 5.3 GiB, so the run is about 1.9 hours of compute (see Benchmarks).
+Training resumes bitwise from any checkpoint folder: weights, optimizer, scheduler and per rank
+random state are stored.
 
 Two details differ from the published inference adapter and are chosen deliberately:
 
@@ -224,10 +264,10 @@ Two details differ from the published inference adapter and are chosen deliberat
 
     src/rvq_ae/
       constants.py   sample rate, hop, frame rate, chunk geometry, codebook sizes
-      alignment.py   frame to latent boundaries, pooling matrix, usable frame count
+      alignment.py   frame to latent boundaries, pooling operator, usable frame count
       config.py      EncoderConfig, published JSON layout
       mup.py         readout, initialisation rescale, optimizer groups
-      layers.py      pre norm transformer layer (bidirectional or causal)
+      layers.py      attention kernels and the pre norm transformer layer
       model.py       ResBlock, DepthDecoder, RvqEncoder
       losses.py      cross entropy, top k teacher KL, top k hit counters
       dav.py         DAV encoder with weight norm folding at load time
@@ -236,12 +276,14 @@ Two details differ from the published inference adapter and are chosen deliberat
       inference.py   CodeEncoder: waveform to codes
       data/          index records, latent cache, window dataset
       schedule.py    warm up and linear decay
-      train.py       torchrun trainer with exact resume
+      train.py       Trainer: torchrun, DDP, autocast, exact resume
       evaluate.py    validation metrics
       cli.py         rvq-ae command
       server/        FastAPI application
-    tests/           pytest suite (CPU only, no downloads)
+      bench/         timing harness and the benchmark suites
+    tests/           pytest suite (CPU, plus CUDA cases when a device is present)
     configs/         training configurations
+    docs/            formulas, dataset, training, evaluation, benchmarks
 
 ## Testing
 
@@ -249,10 +291,20 @@ Two details differ from the published inference adapter and are chosen deliberat
     uv run ruff check src tests
     uv run mypy src
 
-The suite builds the released configurations on the meta device and checks parameter counts
-and state dict keys against the published checkpoints, verifies the alignment invariants, the
-loss identities, weight norm folding against torch, the causal property of the depth decoder,
-and that resuming a run reproduces an uninterrupted run bitwise.
+The suite builds the released configurations on the meta device and checks parameter counts and
+state dict keys against the published checkpoints, verifies the alignment invariants, the loss
+identities, weight norm folding against torch, the causal property of the depth decoder, and that
+resuming a run reproduces an uninterrupted run bitwise. It also proves the two performance changes
+are transparent: the segment pooling operator equals the dense matrix to machine precision in
+float64, and the fused attention kernel matches the unfused reference to the resolution of the
+dtype. Cases that need a GPU are skipped when none is present. tests/test_style.py enforces the
+repository conventions, so they cannot drift.
+
+## Documentation and paper
+
+docs/formulas.md gives every formula with its source location, docs/dataset.md the corpus,
+docs/training.md the four published recipes and their equivalents here, docs/evaluation.md the
+protocols with published and reproduced results, and docs/benchmarks.md the measurements.
 
 ## Links
 

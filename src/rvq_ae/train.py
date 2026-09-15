@@ -1,8 +1,3 @@
-"""Distributed trainer: torchrun, DistributedDataParallel, bf16 autocast, exact resume.
-
-Launch with torchrun --nproc_per_node N -m rvq_ae train --config configs/v4_169m.json
-"""
-
 import dataclasses
 import json
 import logging
@@ -16,12 +11,13 @@ from typing import Any, Self, cast
 
 import torch
 import torch.distributed as dist
+from safetensors.torch import load_file
 from torch import Tensor, nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, DistributedSampler
 
 from rvq_ae.config import EncoderConfig
-from rvq_ae.constants import DATASET_REPO, WINDOW
+from rvq_ae.constants import DATASET_REPO, WINDOW, dtype_name, precision_dtype
 from rvq_ae.data.dataset import Batch, WindowDataset, collate
 from rvq_ae.data.records import Record, load_records
 from rvq_ae.evaluate import autocast, evaluate, to_device
@@ -29,7 +25,7 @@ from rvq_ae.hub import STATE_NAME, WEIGHTS_NAME, save_encoder
 from rvq_ae.losses import rvq_loss, topk_hits
 from rvq_ae.model import RvqEncoder
 from rvq_ae.mup import param_groups
-from rvq_ae.schedule import make_scheduler
+from rvq_ae.schedule import SCHEDULES, make_scheduler
 
 log = logging.getLogger("rvq_ae.train")
 
@@ -39,6 +35,8 @@ METRICS_FILE = "metrics.jsonl"
 
 @dataclass(frozen=True, slots=True)
 class TrainConfig:
+    """Training hyperparameters; precision is a torch dtype, named only in the JSON layout."""
+
     output: str = "output/rvq-encoder"
     model: EncoderConfig = field(default_factory=EncoderConfig)
     dataset: str = DATASET_REPO
@@ -64,12 +62,13 @@ class TrainConfig:
     weight_decay: float = 0.01
     betas: tuple[float, float] = (0.9, 0.999)
     eps: float = 1e-8
+    schedule: str = "linear"
     warmup: int = 500
     lr_end: float = 1e-7
     grad_clip: float = 1.0
     kl_weight: float = 0.25
     tau: float = 1.0
-    precision: str = "bf16"
+    precision: torch.dtype | None = torch.bfloat16
     device: str = "cuda"
     tf32: bool = True
     compile: bool = False
@@ -94,6 +93,10 @@ class TrainConfig:
             kwargs["model"] = EncoderConfig.from_dict(kwargs["model"])
         if "betas" in kwargs:
             kwargs["betas"] = tuple(float(v) for v in kwargs["betas"])
+        if "precision" in kwargs:
+            kwargs["precision"] = precision_dtype(str(kwargs["precision"]))
+        if kwargs.get("schedule", "linear") not in SCHEDULES:
+            raise ValueError(f"unknown schedule {kwargs['schedule']!r}; expected one of {SCHEDULES}")
         return cls(**kwargs)
 
     @classmethod
@@ -106,6 +109,7 @@ class TrainConfig:
         values = dataclasses.asdict(self)
         values["model"] = self.model.to_dict()
         values["betas"] = list(self.betas)
+        values["precision"] = dtype_name(self.precision)
         return values
 
 
@@ -312,7 +316,6 @@ def load_state(
     cfg: TrainConfig,
     world: Dist,
 ) -> TrainState:
-    from safetensors.torch import load_file
 
     raw.load_state_dict(load_file(folder / WEIGHTS_NAME, device="cpu"), strict=True)
     raw.to(world.device)
@@ -357,8 +360,8 @@ class Logger:
 
 
 @dataclass(slots=True)
-class Window:
-    """Running sums over a logging window: loss terms, frames, semantic and acoustic top 1 hits."""
+class Metrics:
+    """Running sums over a logging interval: loss terms, frames, semantic and acoustic top 1 hits."""
 
     values: Tensor = field(default_factory=lambda: torch.zeros(8, dtype=torch.float64))
 
@@ -401,87 +404,118 @@ def micro_steps(
         epoch += 1
 
 
-def train(cfg: TrainConfig) -> Path:
-    world = Dist.init(cfg.device)
-    output = Path(cfg.output)
-    if world.main:
-        output.mkdir(parents=True, exist_ok=True)
-        (output / "train_config.json").write_text(
-            json.dumps(cfg.to_dict(), indent=2) + "\n", encoding="utf-8"
-        )
-    logging.basicConfig(
-        level=logging.INFO if world.main else logging.WARNING, format="%(asctime)s %(message)s"
-    )
-    if world.device.type == "cuda":
-        torch.backends.cuda.matmul.allow_tf32 = cfg.tf32
-        torch.backends.cudnn.allow_tf32 = cfg.tf32
+def enable_tf32(enabled: bool) -> None:
+    """Select the float32 matmul and convolution backend.
 
-    train_set, validation_set = build_datasets(cfg)
-    raw, runner = build_model(cfg, world)
-    optimizer = build_optimizer(cfg, raw)
-    steps = total_steps(cfg, train_set, world)
-    scheduler = make_scheduler(optimizer, warmup=cfg.warmup, total=steps, floor=cfg.lr_end / cfg.lr)
-    state = TrainState()
-    if cfg.resume:
-        state = load_state(
-            Path(cfg.resume), raw=raw, optimizer=optimizer, scheduler=scheduler, cfg=cfg, world=world
+    On Ampere, tf32 trades ten mantissa bits for roughly an order of magnitude more throughput on
+    the float32 paths, which here means the pooling and the readouts; ieee keeps full precision.
+    """
+    mode = "tf32" if enabled else "ieee"
+    torch.backends.cuda.matmul.fp32_precision = mode
+    torch.backends.cudnn.fp32_precision = mode
+
+
+class Trainer:
+    """Distributed trainer: torchrun, DistributedDataParallel, autocast and exact resume.
+
+    Checkpoints carry the weights, the optimizer, the scheduler and the per rank random state, so a
+    resumed run reproduces an uninterrupted one bitwise as long as the world size is unchanged.
+    """
+
+    def __init__(self, cfg: TrainConfig) -> None:
+        self.cfg = cfg
+        self.world = Dist.init(cfg.device)
+        self.output = Path(cfg.output)
+        if self.world.main:
+            self.output.mkdir(parents=True, exist_ok=True)
+            (self.output / "train_config.json").write_text(
+                json.dumps(cfg.to_dict(), indent=2) + "\n", encoding="utf-8"
+            )
+        logging.basicConfig(
+            level=logging.INFO if self.world.main else logging.WARNING, format="%(asctime)s %(message)s"
         )
-    else:
-        seed_everything(cfg.seed + world.rank)
-    sampler: DistributedSampler[int] = DistributedSampler(
-        train_set, num_replicas=world.world, rank=world.rank, shuffle=True, seed=cfg.seed, drop_last=True
-    )
-    logger = Logger(cfg, world)
-    if world.main:
-        log.info(
-            "parameters %d, windows %d, steps %d, world %d",
-            raw.parameter_count(),
-            len(train_set),
-            steps,
-            world.world,
+        if self.world.device.type == "cuda":
+            enable_tf32(cfg.tf32)
+
+        self.train_set, self.validation_set = build_datasets(cfg)
+        self.raw, self.runner = build_model(cfg, self.world)
+        self.optimizer = build_optimizer(cfg, self.raw)
+        self.steps = total_steps(cfg, self.train_set, self.world)
+        self.scheduler = make_scheduler(
+            self.optimizer,
+            schedule=cfg.schedule,
+            warmup=cfg.warmup,
+            total=self.steps,
+            floor=cfg.lr_end / cfg.lr,
+        )
+        self.state = TrainState()
+        if cfg.resume:
+            self.state = load_state(
+                Path(cfg.resume),
+                raw=self.raw,
+                optimizer=self.optimizer,
+                scheduler=self.scheduler,
+                cfg=cfg,
+                world=self.world,
+            )
+        else:
+            seed_everything(cfg.seed + self.world.rank)
+        self.sampler: DistributedSampler[int] = DistributedSampler(
+            self.train_set,
+            num_replicas=self.world.world,
+            rank=self.world.rank,
+            shuffle=True,
+            seed=cfg.seed,
+            drop_last=True,
+        )
+        self.logger = Logger(cfg, self.world)
+        self.metrics = Metrics()
+        self.started = 0.0
+
+    def checkpoint(self, folder: Path) -> None:
+        save_state(
+            folder,
+            raw=self.raw,
+            optimizer=self.optimizer,
+            scheduler=self.scheduler,
+            state=self.state,
+            cfg=self.cfg,
+            world=self.world,
         )
 
-    def validate() -> None:
-        if validation_set is None:
+    def validate(self) -> None:
+        """Score the validation split and keep the checkpoint if it is the best loss so far."""
+        if self.validation_set is None:
             return
         metrics = evaluate(
-            runner,
-            validation_loader(validation_set, cfg, world),
-            device=world.device,
-            kl_weight=cfg.kl_weight,
-            tau=cfg.tau,
-            precision=cfg.precision,
-            max_batches=cfg.max_validation_batches,
-            reduce=world.reduce,
+            self.runner,
+            validation_loader(self.validation_set, self.cfg, self.world),
+            device=self.world.device,
+            kl_weight=self.cfg.kl_weight,
+            tau=self.cfg.tau,
+            precision=self.cfg.precision,
+            max_batches=self.cfg.max_validation_batches,
+            reduce=self.world.reduce,
         )
-        logger.log(state.step, metrics, prefix="validation")
-        if metrics["loss"] < state.best:
-            state.best = metrics["loss"]
-            checkpoint(output / "best" / f"checkpoint-{state.step}")
+        self.logger.log(self.state.step, metrics, prefix="validation")
+        if metrics["loss"] < self.state.best:
+            self.state.best = metrics["loss"]
+            self.checkpoint(self.output / "best" / f"checkpoint-{self.state.step}")
 
-    def checkpoint(folder: Path) -> None:
-        save_state(
-            folder, raw=raw, optimizer=optimizer, scheduler=scheduler, state=state, cfg=cfg, world=world
-        )
+    def accumulate(self, batch: Batch, *, last: bool) -> None:
+        """One micro batch: forward, backward and the running metric window.
 
-    runner.train()
-    window = Window()
-    started = time.time()
-    micro = 0
-    for epoch, batch in micro_steps(cfg, train_set, sampler, state):
-        if state.step >= steps:
-            break
-        if epoch != state.epoch:
-            state.epoch, state.batch = epoch, 0
-        batch = to_device(batch, world.device)
-        last = (micro + 1) % cfg.accumulation == 0
+        Gradient synchronisation is suppressed on every micro batch but the last of an
+        accumulation group, so DistributedDataParallel all reduces once per optimizer step.
+        """
+        cfg = self.cfg
         sync = (
-            runner.no_sync()
-            if (isinstance(runner, DistributedDataParallel) and not last)
+            self.runner.no_sync()
+            if (isinstance(self.runner, DistributedDataParallel) and not last)
             else torch.autocast("cpu", enabled=False)
         )
-        with sync, autocast(world.device, cfg.precision):
-            logits = runner(batch["latents"], batch["pool"], batch["target"])
+        with sync, autocast(self.world.device, cfg.precision):
+            logits = self.runner(batch["latents"], batch["pool"], batch["target"])
             loss = rvq_loss(
                 logits,
                 batch["target"],
@@ -491,35 +525,68 @@ def train(cfg: TrainConfig) -> Path:
                 tau=cfg.tau,
             )
         torch.autograd.backward(loss.total / cfg.accumulation)
-        window.add(
+        self.metrics.add(
             loss.total.detach(),
             loss.ce.detach(),
             loss.kl.detach(),
             batch["target"],
             *topk_hits(logits, batch["target"], 1),
         )
-        micro += 1
-        state.batch += 1
-        if not last:
-            continue
-        torch.nn.utils.clip_grad_norm_(raw.parameters(), cfg.grad_clip)
-        optimizer.step()
-        scheduler.step()
-        optimizer.zero_grad(set_to_none=True)
-        state.step += 1
-        if state.step % cfg.log_every == 0:
-            metrics = window.metrics(world.reduce)
-            metrics["lr"] = float(scheduler.get_last_lr()[0])
-            metrics["epoch"] = state.epoch
-            metrics["seconds"] = time.time() - started
-            logger.log(state.step, metrics, prefix="train")
-            window = Window()
-        if cfg.validate_every > 0 and state.step % cfg.validate_every == 0:
-            validate()
-        if cfg.checkpoint_every > 0 and state.step % cfg.checkpoint_every == 0:
-            checkpoint(output / f"checkpoint-{state.step}")
-    validate()
-    checkpoint(output / "final")
-    logger.close()
-    world.finish()
-    return output
+
+    def step(self) -> None:
+        """Clip, step the optimizer and the schedule, then log, validate and checkpoint on cadence."""
+        cfg = self.cfg
+        torch.nn.utils.clip_grad_norm_(self.raw.parameters(), cfg.grad_clip)
+        self.optimizer.step()
+        self.scheduler.step()
+        self.optimizer.zero_grad(set_to_none=True)
+        self.state.step += 1
+        if self.state.step % cfg.log_every == 0:
+            values = self.metrics.metrics(self.world.reduce)
+            values["lr"] = float(self.scheduler.get_last_lr()[0])
+            values["epoch"] = self.state.epoch
+            values["seconds"] = time.time() - self.started
+            self.logger.log(self.state.step, values, prefix="train")
+            self.metrics = Metrics()
+        if cfg.validate_every > 0 and self.state.step % cfg.validate_every == 0:
+            self.validate()
+        if cfg.checkpoint_every > 0 and self.state.step % cfg.checkpoint_every == 0:
+            self.checkpoint(self.output / f"checkpoint-{self.state.step}")
+
+    def run(self) -> Path:
+        cfg = self.cfg
+        if self.world.main:
+            log.info(
+                "parameters %d, windows %d, steps %d, world %d",
+                self.raw.parameter_count(),
+                len(self.train_set),
+                self.steps,
+                self.world.world,
+            )
+        self.runner.train()
+        self.started = time.time()
+        micro = 0
+        for epoch, batch in micro_steps(cfg, self.train_set, self.sampler, self.state):
+            if self.state.step >= self.steps:
+                break
+            if epoch != self.state.epoch:
+                self.state.epoch, self.state.batch = epoch, 0
+            last = (micro + 1) % cfg.accumulation == 0
+            self.accumulate(to_device(batch, self.world.device), last=last)
+            micro += 1
+            self.state.batch += 1
+            if last:
+                self.step()
+        self.validate()
+        self.checkpoint(self.output / "final")
+        self.logger.close()
+        self.world.finish()
+        return self.output
+
+
+def train(cfg: TrainConfig) -> Path:
+    """Run a training job to completion and return its output folder.
+
+    Launch with torchrun --nproc_per_node N -m rvq_ae train --config configs/v4_169m.json
+    """
+    return Trainer(cfg).run()

@@ -1,10 +1,3 @@
-"""Training objective and accuracy counters for the code streams.
-
-L = mean_k CE_k + w_KL * mean_k KL_k over the K codebooks, where CE_k is the hard cross entropy
-against the sampled code and KL_k distils the generator's stored top k distribution
-(Hinton et al., Distilling the Knowledge in a Neural Network, 2015).
-"""
-
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -69,6 +62,12 @@ def rvq_loss(
     kl_weight: float = 0.0,
     tau: float = 1.0,
 ) -> Loss:
+    """Reverse distillation objective L = mean_k CE_k + w_KL mean_k KL_k over the K codebooks.
+
+    CE_k is the hard cross entropy against the code the generator sampled; KL_k distils the
+    generator's stored top k distribution (Hinton et al., Distilling the Knowledge in a Neural
+    Network, 2015). The released models use w_KL = 0.25 and tau = 1.
+    """
     ce = codebook_ce(logits, target).mean()
     if kl_weight <= 0.0:
         return Loss(total=ce, ce=ce, kl=torch.zeros_like(ce))

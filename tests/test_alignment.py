@@ -5,6 +5,7 @@ import torch
 
 from rvq_ae.alignment import (
     Chunk,
+    Pool,
     frame_bounds,
     frame_centers,
     nominal_bounds,
@@ -110,3 +111,38 @@ def test_frame_centers_use_the_dav_hop() -> None:
     centers = frame_centers([0, 4, 7])
     expected = torch.tensor([2.0, 5.5], dtype=torch.float64) * HOP / SAMPLE_RATE
     assert torch.allclose(centers, expected)
+
+
+@pytest.mark.parametrize("frames", [4, 37, 128, 1000])
+def test_segment_pooling_equals_the_dense_operator(frames: int) -> None:
+    """Pool.apply is the same linear map as the published matrix P, to machine precision."""
+    bounds = nominal_bounds(frames)
+    dense = pool_matrix(bounds, torch.float64)
+    hidden = torch.randn(1, dense.shape[1], 16, dtype=torch.float64)
+    assert torch.allclose(torch.bmm(dense[None], hidden), Pool.of(bounds).batched().apply(hidden), atol=1e-14)
+
+
+def test_segment_pooling_ignores_right_padding() -> None:
+    """Latents past the last boundary land on the sink row and reach no frame."""
+    bounds = nominal_bounds(8)
+    covered = bounds[-1]
+    pool = Pool.of(bounds, length=covered + 5).batched()
+    hidden = torch.randn(1, covered + 5, 16, dtype=torch.float64)
+    hidden[:, covered:] = 1e9
+    dense = pool_matrix(bounds, torch.float64)
+    assert torch.allclose(torch.bmm(dense[None], hidden[:, :covered]), pool.apply(hidden), atol=1e-14)
+
+
+def test_pool_of_rejects_empty_spans_and_short_lengths() -> None:
+    with pytest.raises(ValueError, match="empty latent span"):
+        Pool.of([0, 3, 3])
+    with pytest.raises(ValueError, match="at least two boundaries"):
+        Pool.of([0])
+    with pytest.raises(ValueError, match="shorter than"):
+        Pool.of([0, 2, 4], length=3)
+
+
+def test_pool_spans_are_the_boundary_differences() -> None:
+    pool = Pool.of([10, 12, 15, 16])
+    assert pool.span.tolist() == [2.0, 3.0, 1.0]
+    assert pool.frame.tolist() == [0, 0, 1, 1, 1, 2]

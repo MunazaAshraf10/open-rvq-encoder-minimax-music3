@@ -1,8 +1,8 @@
 import torch
 
 from conftest import tiny_config, tiny_dav
-from rvq_ae.alignment import nominal_bounds
-from rvq_ae.inference import CodeEncoder, frame_count, windows
+from rvq_ae.alignment import Pool, nominal_bounds
+from rvq_ae.inference import CodeEncoder, frame_count, frames_for_latents, windows
 from rvq_ae.model import RvqEncoder
 
 
@@ -48,10 +48,8 @@ def test_windowed_encoding_matches_a_direct_window_forward() -> None:
     result = codec.encode_latents(latents, frames)
     assert len(windows(frames, codec.window)) == 3
     bounds = nominal_bounds(frames)
-    from rvq_ae.alignment import pool_matrix
-
-    pool = pool_matrix(bounds[8:17])
-    direct = codec.model.codes(latents[bounds[8] : bounds[16]][None], pool[None])[0]
+    pool = Pool.of(bounds[8:17]).batched()
+    direct = codec.model.codes(latents[bounds[8] : bounds[16]][None], pool)[0]
     assert torch.equal(result.codes[8:16], direct)
 
 
@@ -62,7 +60,6 @@ def test_resampling_keeps_the_frame_count() -> None:
 
 
 def test_frames_for_latents_inverts_the_nominal_timeline() -> None:
-    from rvq_ae.inference import frames_for_latents
 
     for frames in (1, 7, 25, 128, 300):
         latents = nominal_bounds(frames)[-1]

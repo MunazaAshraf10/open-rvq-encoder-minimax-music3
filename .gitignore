@@ -19,6 +19,7 @@ htmlcov/
 
 # data, caches, runs
 cache/
+results/**/*.log
 output/
 runs/
 wandb/
@@ -31,3 +32,19 @@ wandb/
 .vscode/
 .idea/
 .DS_Store
+
+# latex build residue
+*.aux
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.out
+*.toc
+paper/*.log
+paper/_build/
+
+# benchmark data, evaluation results and the paper stay local
+benchmarks/
+results/
+paper/

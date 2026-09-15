@@ -1,11 +1,16 @@
 import json
 from pathlib import Path
 
+import soundfile
 import torch
+from safetensors.torch import load_file, save_file
 
-from conftest import synthetic_cache, tiny_config
+from conftest import synthetic_cache, tiny_config, tiny_dav, write_shard
 from rvq_ae.cli import build_parser, checkpoints, main
+from rvq_ae.hub import save_encoder
+from rvq_ae.model import RvqEncoder
 from rvq_ae.train import TrainConfig, train
+from test_dav import legacy_state
 
 
 def test_parser_exposes_every_command() -> None:
@@ -82,10 +87,6 @@ def test_train_then_evaluate_command(tmp_path: Path) -> None:
 
 
 def write_tiny_dav(folder: Path) -> Path:
-    from safetensors.torch import save_file
-
-    from conftest import tiny_dav
-    from test_dav import legacy_state
 
     (folder / "audio_vae").mkdir(parents=True)
     save_file(legacy_state(tiny_dav()), folder / "audio_vae" / "diffusion_pytorch_model.safetensors")
@@ -101,12 +102,6 @@ def write_tiny_dav(folder: Path) -> Path:
 
 
 def test_cache_and_encode_commands(tmp_path: Path) -> None:
-    import soundfile
-    from safetensors.torch import load_file
-
-    from conftest import write_shard
-    from rvq_ae.hub import save_encoder
-    from rvq_ae.model import RvqEncoder
 
     corpus = tmp_path / "corpus"
     write_shard(corpus, shard_id=0)

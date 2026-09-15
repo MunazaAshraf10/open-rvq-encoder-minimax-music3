@@ -1,4 +1,4 @@
-"""Signal geometry shared by the DAV autoencoder, the RVQ code stream and the trainer."""
+import torch
 
 SAMPLE_RATE = 44_100
 """DAV input sample rate in Hz."""
@@ -62,3 +62,40 @@ DAV_REPO = "SimpleTuner/MiniMax-Music-3-Encoder"
 
 DATASET_REPO = "bghira/minimax-music3-rvq-reverse-distillation"
 """Hub dataset of generated tracks with sampled codes and teacher top 50 logits."""
+
+PRECISIONS: dict[str, torch.dtype | None] = {
+    "fp32": None,
+    "bf16": torch.bfloat16,
+    "fp16": torch.float16,
+}
+"""Autocast dtype by name; None runs the forward pass in full float32."""
+
+CACHE_DTYPES: dict[str, torch.dtype] = {
+    "float32": torch.float32,
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+}
+"""Storage dtype of the latent cache, by name."""
+
+
+def precision_dtype(name: str) -> torch.dtype | None:
+    """Autocast dtype for a precision name, the only place a precision arrives as text."""
+    if name not in PRECISIONS:
+        raise ValueError(f"unknown precision {name!r}; expected one of {sorted(PRECISIONS)}")
+    return PRECISIONS[name]
+
+
+def cache_dtype(name: str) -> torch.dtype:
+    """Latent cache dtype for a name, used as the argparse converter."""
+    if name not in CACHE_DTYPES:
+        raise ValueError(f"unknown dtype {name!r}; expected one of {sorted(CACHE_DTYPES)}")
+    return CACHE_DTYPES[name]
+
+
+def dtype_name(dtype: torch.dtype | None) -> str:
+    """Inverse of precision_dtype and cache_dtype, for JSON and metadata."""
+    for table in (PRECISIONS, CACHE_DTYPES):
+        for name, value in table.items():
+            if value is dtype:
+                return name
+    raise ValueError(f"no name registered for {dtype}")

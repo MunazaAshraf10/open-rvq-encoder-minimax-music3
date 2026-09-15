@@ -1,19 +1,9 @@
-"""DAV latent to RVQ code encoder with a causal decoder across codebook depth.
-
-latents [B, L, 128] at 86.13 Hz
-  -> conv stem and dilated residual stack (latent rate)
-  -> mean pooling with the per sample matrix P [B, T, L] (25 Hz frames)
-  -> learned frame positions and N bidirectional pre norm layers
-  -> semantic logits (codebook 0)
-  -> depth decoder: acoustic codebook k conditioned on the frame context,
-     the semantic code and acoustic codebooks < k
-"""
-
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.utils.checkpoint import checkpoint
 
+from rvq_ae.alignment import Pool
 from rvq_ae.config import EncoderConfig
 from rvq_ae.constants import IGNORE
 from rvq_ae.layers import Layer
@@ -74,6 +64,7 @@ class DepthDecoder(nn.Module):
                 cfg.depth_decoder_dropout,
                 scale=scale,
                 causal=True,
+                fused=False,
             )
             for index in range(cfg.depth_decoder_layers)
         )
@@ -143,15 +134,21 @@ class RvqEncoder(nn.Module):
         self.checkpointing = False
         rescale_init(self, cfg.width_mult)
 
-    def features(self, latents: Tensor, pool: Tensor) -> Tensor:
-        """Frame features [B, T, d] from latents [B, L, C] and the pooling matrix [B, T, L]."""
-        frames = pool.shape[1]
+    def features(self, latents: Tensor, pool: Pool) -> Tensor:
+        """Frame features [B, T, d] from DAV latents [B, L, C].
+
+        latents at 86.1328125 Hz
+          -> conv stem and dilated residual stack, still at the latent rate
+          -> mean pooling with the per sample operator P onto 25 Hz frames
+          -> learned frame positions and N bidirectional pre norm layers.
+        """
+        frames = pool.span.shape[-1]
         if frames > self.position.shape[1]:
             raise ValueError(f"{frames} frames exceed the {self.position.shape[1]} frame context")
         hidden = self.conv_in(latents.transpose(1, 2))
         for block in self.blocks:
             hidden = block(hidden)
-        hidden = torch.bmm(pool, hidden.transpose(1, 2)) + self.position[:, :frames]
+        hidden = pool.apply(hidden.transpose(1, 2)) + self.position[:, :frames]
         for layer in self.transformer:
             if self.checkpointing and self.training:
                 hidden = checkpoint(layer, hidden, use_reentrant=False)
@@ -168,11 +165,11 @@ class RvqEncoder(nn.Module):
             return [semantic, *self.depth_decoder(features, targets)]
         return [semantic, *self.depth_decoder.generate(features, semantic.argmax(dim=-1))]
 
-    def forward(self, latents: Tensor, pool: Tensor, targets: Tensor | None = None) -> list[Tensor]:
+    def forward(self, latents: Tensor, pool: Pool, targets: Tensor | None = None) -> list[Tensor]:
         return self.logits(self.features(latents, pool), targets)
 
     @torch.no_grad()
-    def codes(self, latents: Tensor, pool: Tensor) -> Tensor:
+    def codes(self, latents: Tensor, pool: Pool) -> Tensor:
         """Greedy codes [B, T, K]."""
         return torch.stack([scores.argmax(dim=-1) for scores in self.forward(latents, pool)], dim=-1)
 

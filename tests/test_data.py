@@ -3,9 +3,11 @@ from pathlib import Path
 
 import pytest
 import torch
+from safetensors import safe_open
+from safetensors.torch import load_file
 
 from conftest import TINY_VOCABS, synthetic_cache, tiny_dav, write_shard
-from rvq_ae.alignment import nominal_bounds
+from rvq_ae.alignment import Pool, nominal_bounds
 from rvq_ae.constants import CACHE_FORMAT, IGNORE
 from rvq_ae.data.cache import build_cache, cache_paths, cached, read_meta
 from rvq_ae.data.dataset import WindowDataset, check_codes, collate, crop_start
@@ -56,7 +58,6 @@ def test_cache_writes_latents_codes_and_teacher_tensors(tmp_path: Path) -> None:
     assert meta["exact"]
     assert meta["mapped_latent_frames"] == nominal_bounds(25)[-1]
     assert cached(root, record, need_topk=True)
-    from safetensors import safe_open
 
     with safe_open(cache_paths(root, record)[0], framework="pt") as handle:
         assert set(handle.keys()) == {"latents", "codes", "teacher_topk_ids", "teacher_topk_logits"}
@@ -104,7 +105,6 @@ def test_dataset_applies_the_priming_offset(tmp_path: Path) -> None:
     dataset = WindowDataset([record], root, size=8, stride=8, need_topk=True)
     assert len(dataset) == (25 - 8) // 8 + 1
     sample = dataset[1]
-    from safetensors.torch import load_file
 
     stored = load_file(cache_paths(root, record)[0])
     assert torch.equal(sample["target"], stored["codes"][9:17].long())
@@ -112,8 +112,8 @@ def test_dataset_applies_the_priming_offset(tmp_path: Path) -> None:
     bounds = nominal_bounds(25)
     assert sample["latents"].shape == (bounds[16] - bounds[8], 8)
     assert torch.allclose(sample["latents"], stored["latents"][bounds[8] : bounds[16]].float())
-    assert sample["pool"].shape == (8, bounds[16] - bounds[8])
-    assert torch.allclose(sample["pool"].sum(dim=1), torch.ones(8))
+    assert sample["pool"].frame.shape == (bounds[16] - bounds[8],)
+    assert torch.equal(sample["pool"].span.sum(), torch.tensor(float(bounds[16] - bounds[8])))
 
 
 def test_random_crop_is_deterministic_per_epoch(tmp_path: Path) -> None:
@@ -146,30 +146,53 @@ def test_short_tracks_are_dropped(tmp_path: Path) -> None:
     assert len(WindowDataset([record], root, size=26)) == 0
 
 
-def test_collate_pads_latents_and_pool_columns() -> None:
-    from rvq_ae.alignment import pool_matrix
-
+def test_collate_pads_latents_and_sends_padding_to_the_sink_row() -> None:
     a = {
         "latents": torch.ones(4, 3),
-        "pool": pool_matrix([0, 2, 4]),
+        "pool": Pool.of([0, 2, 4]),
         "target": torch.zeros(2, 8, dtype=torch.long),
     }
     b = {
         "latents": torch.ones(6, 3),
-        "pool": pool_matrix([0, 3, 6]),
+        "pool": Pool.of([0, 3, 6]),
         "target": torch.ones(2, 8, dtype=torch.long),
     }
     batch = collate([a, b])
     assert batch["latents"].shape == (2, 6, 3)
     assert torch.all(batch["latents"][0, 4:] == 0)
-    assert batch["pool"].shape == (2, 2, 6)
-    assert torch.allclose(batch["pool"].sum(dim=-1), torch.ones(2, 2))
+    assert batch["pool"].frame.shape == (2, 6)
+    assert batch["pool"].span.shape == (2, 2)
+    # the two padded columns of the shorter window point at frame 2, the discarded sink row
+    assert batch["pool"].frame[0].tolist() == [0, 0, 1, 1, 2, 2]
+    assert batch["pool"].frame[1].tolist() == [0, 0, 0, 1, 1, 1]
     assert batch["target"].shape == (2, 2, 8)
     assert "ids" not in batch
 
 
+def test_collate_padding_does_not_reach_any_frame() -> None:
+    """A short window padded into a wider batch pools exactly as it does on its own."""
+    short = {
+        "latents": torch.randn(4, 3),
+        "pool": Pool.of([0, 2, 4]),
+        "target": torch.zeros(2, 8, dtype=torch.long),
+    }
+    long = {
+        "latents": torch.randn(9, 3),
+        "pool": Pool.of([0, 4, 9]),
+        "target": torch.zeros(2, 8, dtype=torch.long),
+    }
+    alone = short["pool"].batched().apply(short["latents"][None])
+    batch = collate([short, long])
+    padded = batch["pool"].apply(batch["latents"])[:1]
+    assert torch.allclose(alone, padded)
+
+
 def test_collate_rejects_mixed_teacher_presence() -> None:
-    a = {"latents": torch.ones(4, 3), "pool": torch.ones(2, 4), "target": torch.zeros(2, 8, dtype=torch.long)}
+    a = {
+        "latents": torch.ones(4, 3),
+        "pool": Pool.of([0, 2, 4]),
+        "target": torch.zeros(2, 8, dtype=torch.long),
+    }
     b = dict(a, ids=torch.zeros(2, 8, 3, dtype=torch.long), teacher=torch.zeros(2, 8, 3))
     with pytest.raises(ValueError, match="mixed batch"):
         collate([a, b])

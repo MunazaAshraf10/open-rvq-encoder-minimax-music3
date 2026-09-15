@@ -6,7 +6,7 @@ import torch
 from safetensors.torch import load_file
 
 from conftest import synthetic_cache, tiny_config
-from rvq_ae.schedule import lr_lambda
+from rvq_ae.schedule import cosine_lambda, lr_lambda, make_scheduler
 from rvq_ae.train import Dist, TrainConfig, train
 
 
@@ -123,3 +123,28 @@ def test_schedule_shape() -> None:
     assert lr_lambda(110, **kwargs) == pytest.approx(0.1)
     assert lr_lambda(500, **kwargs) == pytest.approx(0.1)
     assert lr_lambda(3, warmup=0, total=3, floor=0.0) == 0.0
+
+
+def test_cosine_schedule_reproduces_the_published_v1_trace() -> None:
+    """Half period 500: one at step zero, the floor at 500, 1,500, ..., 17,500, no warm up."""
+    kwargs = {"half_period": 500, "floor": 1e-7 / 3e-4}
+    assert cosine_lambda(0, **kwargs) == 1.0
+    for minimum in range(500, 18_000, 1_000):
+        assert cosine_lambda(minimum, **kwargs) == pytest.approx(kwargs["floor"], abs=1e-12)
+        assert cosine_lambda(minimum + 500, **kwargs) == pytest.approx(1.0, abs=1e-12)
+    assert cosine_lambda(250, **kwargs) == pytest.approx(0.5 + kwargs["floor"] / 2, abs=1e-6)
+    with pytest.raises(ValueError, match="half_period"):
+        cosine_lambda(1, half_period=0, floor=0.0)
+
+
+def test_make_scheduler_dispatches_on_the_schedule_name() -> None:
+    param = torch.nn.Parameter(torch.zeros(1))
+    optimizer = torch.optim.SGD([param], lr=1.0)
+    linear = make_scheduler(optimizer, schedule="linear", warmup=10, total=100, floor=0.0)
+    assert linear.get_last_lr()[0] == 0.0
+    cosine = make_scheduler(optimizer, schedule="cosine", warmup=10, total=100, floor=0.0)
+    assert cosine.get_last_lr()[0] == 1.0
+    with pytest.raises(ValueError, match="unknown schedule"):
+        make_scheduler(optimizer, schedule="sine", warmup=10, total=100, floor=0.0)
+    with pytest.raises(ValueError, match="unknown schedule"):
+        TrainConfig.from_dict({"schedule": "sine"})

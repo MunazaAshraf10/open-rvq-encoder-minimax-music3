@@ -1,10 +1,3 @@
-"""Validation metrics: loss terms and per codebook top k accuracy.
-
-Models with a depth decoder are scored twice: teacher forced (the training condition) and
-free running (the inference condition, where each acoustic codebook sees greedy predictions
-of the earlier ones).
-"""
-
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -62,10 +55,11 @@ class Counter:
         return out
 
 
-def autocast(device: torch.device, precision: str) -> torch.autocast | nullcontext[None]:
-    if precision == "bf16":
-        return torch.autocast(device.type, dtype=torch.bfloat16)
-    return nullcontext()
+def autocast(device: torch.device, dtype: torch.dtype | None) -> torch.autocast | nullcontext[None]:
+    """Autocast context for the given dtype; a dtype of None runs in full float32."""
+    if dtype is None:
+        return nullcontext()
+    return torch.autocast(device.type, dtype=dtype)
 
 
 def unwrap(model: nn.Module) -> RvqEncoder:
@@ -78,7 +72,7 @@ def unwrap(model: nn.Module) -> RvqEncoder:
 def to_device(batch: Batch, device: torch.device) -> Batch:
     moved: Batch = {
         "latents": batch["latents"].to(device, non_blocking=True),
-        "pool": batch["pool"].to(device, non_blocking=True),
+        "pool": batch["pool"].to(device),
         "target": batch["target"].to(device, non_blocking=True),
     }
     if "ids" in batch:
@@ -95,11 +89,16 @@ def evaluate(
     device: torch.device,
     kl_weight: float = 0.0,
     tau: float = 1.0,
-    precision: str = "fp32",
+    precision: torch.dtype | None = None,
     max_batches: int = 0,
     reduce: Callable[[Tensor], Tensor] | None = None,
 ) -> dict[str, float]:
-    """Metrics over the batches; reduce(tensor) sums the counter across processes when given."""
+    """Validation metrics: loss terms and per codebook top k accuracy.
+
+    Models with a depth decoder are scored twice: teacher forced, which is the training condition,
+    and free running, which is the inference condition where each acoustic codebook sees greedy
+    predictions of the ones below it. reduce(tensor) sums the counter across processes when given.
+    """
     encoder = unwrap(model)
     books = encoder.cfg.num_codebooks
     depth = encoder.depth_decoder is not None

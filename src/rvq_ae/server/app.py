@@ -1,5 +1,3 @@
-"""FastAPI application: encode audio or latents to codes, score codes against a reference."""
-
 import io
 import json
 import os
@@ -9,6 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Annotated, Literal, Self
 
+import soundfile
 import torch
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -214,7 +213,6 @@ def create_app(settings: Settings | None = None, *, encoder: CodeEncoder | None 
 
 def stream_to_wav_bytes(audio: Tensor, rate: int) -> bytes:
     """Helper for clients and tests: encode [channels, samples] as WAV bytes."""
-    import soundfile
 
     buffer = io.BytesIO()
     soundfile.write(buffer, audio.numpy(force=True).T, rate, format="WAV")

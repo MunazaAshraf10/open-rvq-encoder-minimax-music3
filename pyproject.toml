@@ -34,6 +34,7 @@ serve = [
   "pydantic>=2.13",
 ]
 train = ["wandb>=0.25"]
+paper = ["matplotlib>=3.10"]
 dev = [
   "pytest>=9.1",
   "pytest-cov>=7.1",
@@ -65,6 +66,9 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "N", "RUF"]
 ignore = ["N812"]
+# No identifier in this repository starts with an underscore (enforced by tests/test_style.py),
+# so loop counters that exist only to repeat a body are named from this list instead of _.
+dummy-variable-rgx = "^(unused|warm|rep|micro|index)$"
 
 [tool.ruff.lint.isort]
 known-first-party = ["rvq_ae"]

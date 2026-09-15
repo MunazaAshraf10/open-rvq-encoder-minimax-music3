@@ -1,10 +1,3 @@
-"""DAV latent cache: one safetensors file plus a JSON sidecar per track.
-
-Audio is decoded from the shard, encoded once through the frozen DAV encoder and stored as
-[latent_frames, 128] together with the sampled codes and the teacher top k tensors, so training
-never touches audio again.
-"""
-
 import json
 import os
 import zipfile
@@ -17,14 +10,13 @@ from huggingface_hub import hf_hub_download
 from safetensors.torch import load as load_bytes
 from safetensors.torch import save_file
 from torch import Tensor
+from tqdm.auto import tqdm
 
 from rvq_ae.alignment import frame_bounds
 from rvq_ae.audio import load_audio, resample
-from rvq_ae.constants import CACHE_FORMAT, DATASET_REPO
+from rvq_ae.constants import CACHE_FORMAT, DATASET_REPO, dtype_name
 from rvq_ae.data.records import Record
 from rvq_ae.dav import DavEncoder
-
-DTYPES = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16}
 
 
 def cache_paths(root: Path, record: Record) -> tuple[Path, Path]:
@@ -79,6 +71,12 @@ def encode_record(
     device: torch.device,
     dtype: torch.dtype = torch.bfloat16,
 ) -> dict[str, Any]:
+    """Encode one track into the cache: a safetensors file plus a JSON sidecar.
+
+    Audio is decoded from the shard and passed once through the frozen DAV encoder, then stored as
+    [latent_frames, 128] beside the sampled codes and the teacher top k tensors, so that training
+    never touches audio again. Both files are written atomically.
+    """
     audio, rate, tensors = read_shard(shard, record)
     audio = resample(audio, rate, dav.sample_rate)
     latents = dav.encode(audio.to(device))[0].transpose(0, 1).to("cpu", dtype).contiguous()
@@ -105,7 +103,7 @@ def encode_record(
         "topk": int(payload["teacher_topk_ids"].shape[-1]) if has_topk else 0,
         "exact": record.exact,
         "mapped_latent_frames": frame_bounds(max(frames, 1), record.chunks)[-1],
-        "dtype": str(dtype).removeprefix("torch."),
+        "dtype": dtype_name(dtype),
     }
     tensors_path, meta_path = cache_paths(root, record)
     tensors_path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,7 +129,6 @@ def build_cache(
     progress: bool = True,
 ) -> int:
     """Encode this rank's share (index modulo world) of the records; returns how many were written."""
-    from tqdm.auto import tqdm
 
     todo = [record for index, record in enumerate(records) if index % world == rank]
     written = 0

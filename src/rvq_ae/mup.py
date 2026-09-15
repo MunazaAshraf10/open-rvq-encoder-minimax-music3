@@ -1,20 +1,3 @@
-"""Maximal update parametrisation (muP) for the shared encoder width.
-
-Yang et al., Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter
-Transfer (2022). With width multiplier m = d_model / base width, muP changes three things
-relative to the standard parametrisation:
-
-1. readouts (width -> fixed size) divide their input by m;
-2. attention logits scale by 1 / d_head instead of 1 / sqrt(d_head) (see EncoderConfig);
-3. Adam learning rate of matrix like weights (both dims grow with width) is divided by m,
-   and their weight decay is multiplied by m so the decay per step is unchanged.
-
-Initialisation follows the reference implementation: biases fed by a width sized fan in are
-multiplied by sqrt(m) and non zero readout weights and biases are multiplied by sqrt(m).
-The rules are expressed on parameter names so fixed width components (the depth decoder,
-the latent stem) are never touched.
-"""
-
 import re
 from collections.abc import Iterable
 
@@ -49,8 +32,11 @@ def no_decay(name: str) -> bool:
 class Readout(nn.Linear):
     """Linear map from the width dimension to a fixed size with the muP 1 / m input scale.
 
-    y = output_mult * W (x / m) + b. The multiplier is a plain attribute so the state dict
-    matches a standard nn.Linear.
+    Rule one of the maximal update parametrisation (Yang et al., Tensor Programs V: Tuning Large
+    Neural Networks via Zero-Shot Hyperparameter Transfer, 2022): a readout computes
+    y = output_mult * W (x / m) + b with width multiplier m = d_model / base width. Rule two lives
+    in EncoderConfig.attention_scale and rule three in param_groups. The multiplier is a plain
+    attribute rather than a buffer, so the state dict matches a standard nn.Linear exactly.
     """
 
     def __init__(
@@ -80,7 +66,9 @@ class Readout(nn.Linear):
 def rescale_init(model: nn.Module, width_mult: float) -> None:
     """Convert a freshly initialised standard parametrisation model to muP initialisation.
 
-    Call exactly once on a new model and never after loading weights.
+    Following the reference implementation, biases fed by a width sized fan in and non zero readout
+    weights and biases are multiplied by sqrt(m). Call exactly once on a new model, never after
+    loading weights.
     """
     if width_mult == 1.0:
         return
@@ -103,7 +91,13 @@ def param_groups(
     weight_decay: float,
     width_mult: float,
 ) -> list[dict[str, object]]:
-    """AdamW parameter groups: the decay split first, then the muP scaling of matrix like weights."""
+    """AdamW parameter groups: the decay split first, then the muP scaling of matrix like weights.
+
+    Rule three of muP: weights whose input and output dimensions both grow with width take
+    lr / m, and their weight decay is multiplied by m so that the decay applied per step is
+    invariant to width. Everything else keeps the base learning rate. The rules are matched on
+    parameter names, so fixed width components (the latent stem, the depth decoder) are untouched.
+    """
     buckets: dict[tuple[bool, bool], list[nn.Parameter]] = {}
     for name, param in named:
         if not param.requires_grad:

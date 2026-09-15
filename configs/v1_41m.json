@@ -59,6 +59,7 @@
   "resume": null,
   "revision": null,
   "run_name": null,
+  "schedule": "cosine",
   "seed": 42,
   "stride": 128,
   "tau": 1.0,

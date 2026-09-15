@@ -1,5 +1,3 @@
-"""Encoder hyperparameters, serialised in the same JSON layout as the released checkpoints."""
-
 import dataclasses
 import json
 from collections.abc import Mapping
@@ -14,6 +12,8 @@ DEFAULT_BASE_WIDTH = 128
 
 @dataclass(frozen=True, slots=True)
 class EncoderConfig:
+    """Encoder hyperparameters, serialised in the same JSON layout as the released checkpoints."""
+
     latent_channels: int = LATENT_CHANNELS
     codebook_vocab_sizes: tuple[int, ...] = VOCABS
     d_model: int = 512

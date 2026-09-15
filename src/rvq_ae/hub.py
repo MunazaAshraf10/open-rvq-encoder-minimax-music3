@@ -1,9 +1,3 @@
-"""Checkpoint layout and Hub transfer.
-
-Two layouts are read: the release collection (encoders/<name>.json and .safetensors) and the
-per run layout written by the trainer (<folder>/rvq_encoder_config.json and rvq_encoder.safetensors).
-"""
-
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +12,8 @@ from rvq_ae.config import EncoderConfig
 from rvq_ae.constants import COLLECTION, LEGACY_WEIGHTS_FORMAT, WEIGHTS_FORMAT
 from rvq_ae.model import RvqEncoder
 
+# Two checkpoint layouts are read: the release collection (encoders/<name>.json and .safetensors)
+# and the per run layout the trainer writes (rvq_encoder_config.json and rvq_encoder.safetensors).
 CONFIG_NAME = "rvq_encoder_config.json"
 WEIGHTS_NAME = "rvq_encoder.safetensors"
 STATE_NAME = "trainer_state.json"

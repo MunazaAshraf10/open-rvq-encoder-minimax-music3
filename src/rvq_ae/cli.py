@@ -1,20 +1,41 @@
-"""Command line entry points: cache, train, evaluate, encode, push, serve."""
-
 import argparse
 import csv
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import torch
+from safetensors.torch import save_file
+from torch.utils.data import DataLoader
 
-from rvq_ae.constants import COLLECTION, DATASET_REPO, DAV_REPO
-from rvq_ae.data.cache import DTYPES, build_cache
+from rvq_ae.audio import load_audio
+from rvq_ae.bench.main import OFFLINE, SUITES, run
+from rvq_ae.constants import (
+    CACHE_DTYPES,
+    COLLECTION,
+    DATASET_REPO,
+    DAV_REPO,
+    PRECISIONS,
+    cache_dtype,
+    precision_dtype,
+)
+from rvq_ae.data.cache import build_cache
+from rvq_ae.data.dataset import WindowDataset, collate
 from rvq_ae.data.records import load_records
 from rvq_ae.dav import load_dav
+from rvq_ae.evaluate import evaluate
+from rvq_ae.hub import STATE_NAME, load_encoder, push_folder
+from rvq_ae.inference import CodeEncoder
+from rvq_ae.server.app import Settings, create_app
+from rvq_ae.train import TrainConfig, train
 
 log = logging.getLogger("rvq_ae")
+
+
+def names(table: Mapping[str, object]) -> str:
+    """Argparse metavar listing the accepted names of a dtype table."""
+    return "{" + ",".join(table) + "}"
 
 
 def device_arg(parser: argparse.ArgumentParser, default: str = "cuda") -> None:
@@ -59,7 +80,7 @@ def cmd_cache(args: argparse.Namespace) -> None:
         corpus=args.corpus,
         repo=args.dataset,
         revision=args.revision,
-        dtype=DTYPES[args.dtype],
+        dtype=args.dtype,
         need_topk=not args.no_topk,
         rebuild=args.rebuild,
         rank=args.rank,
@@ -69,7 +90,6 @@ def cmd_cache(args: argparse.Namespace) -> None:
 
 
 def cmd_train(args: argparse.Namespace) -> None:
-    from rvq_ae.train import TrainConfig, train
 
     cfg = TrainConfig.load(
         args.config, output=args.output, resume=args.resume, device=args.device, max_steps=args.max_steps
@@ -79,7 +99,6 @@ def cmd_train(args: argparse.Namespace) -> None:
 
 def checkpoints(run: Path) -> list[tuple[str, int, Path]]:
     """(name, step, folder) for checkpoint-N, best/checkpoint-N and final, ordered by step."""
-    from rvq_ae.hub import STATE_NAME
 
     found: list[tuple[str, int, Path]] = []
     for folder in list(run.glob("checkpoint-*")) + list(run.glob("best/checkpoint-*")) + [run / "final"]:
@@ -91,11 +110,6 @@ def checkpoints(run: Path) -> list[tuple[str, int, Path]]:
 
 
 def cmd_evaluate(args: argparse.Namespace) -> None:
-    from torch.utils.data import DataLoader
-
-    from rvq_ae.data.dataset import WindowDataset, collate
-    from rvq_ae.evaluate import evaluate
-    from rvq_ae.hub import load_encoder
 
     device = torch.device(args.device)
     grouped = load_records(args.dataset, revision=args.revision, limit=args.index_limit)
@@ -145,10 +159,6 @@ def cmd_evaluate(args: argparse.Namespace) -> None:
 
 
 def cmd_encode(args: argparse.Namespace) -> None:
-    from safetensors.torch import save_file
-
-    from rvq_ae.audio import load_audio
-    from rvq_ae.inference import CodeEncoder
 
     codec = CodeEncoder.load(
         args.model,
@@ -172,8 +182,18 @@ def cmd_encode(args: argparse.Namespace) -> None:
     log.info("%d frames (%.2f s) from %s", result.frames, result.frames / 25, args.audio)
 
 
+def cmd_bench(args: argparse.Namespace) -> None:
+
+    if args.suite is None:
+        suites = list(OFFLINE)
+    elif "all" in args.suite:
+        suites = list(SUITES)
+    else:
+        suites = list(args.suite)
+    run(suites, device=torch.device(args.device), dtype=args.dtype, out=args.out, seed=args.seed)
+
+
 def cmd_push(args: argparse.Namespace) -> None:
-    from rvq_ae.hub import push_folder
 
     url = push_folder(
         args.folder, args.repo, path_in_repo=args.path_in_repo, private=args.private, message=args.message
@@ -183,8 +203,6 @@ def cmd_push(args: argparse.Namespace) -> None:
 
 def cmd_serve(args: argparse.Namespace) -> None:
     import uvicorn
-
-    from rvq_ae.server.app import Settings, create_app
 
     settings = Settings(
         model=args.model,
@@ -208,7 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     cache.add_argument("--dav", default=DAV_REPO)
     cache.add_argument("--split", action="append", help="split to cache (repeatable); default all")
     cache.add_argument("--max-records", type=int, default=0)
-    cache.add_argument("--dtype", choices=sorted(DTYPES), default="bfloat16")
+    cache.add_argument("--dtype", type=cache_dtype, default=torch.bfloat16, metavar=names(CACHE_DTYPES))
     cache.add_argument("--no-topk", action="store_true", help="accept caches without teacher top k tensors")
     cache.add_argument("--rebuild", action="store_true")
     cache.add_argument(
@@ -243,7 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--max-batches", type=int, default=0)
     evaluate.add_argument("--kl-weight", type=float, default=0.25)
     evaluate.add_argument("--tau", type=float, default=1.0)
-    evaluate.add_argument("--precision", choices=("fp32", "bf16"), default="fp32")
+    evaluate.add_argument("--precision", type=precision_dtype, default=None, metavar=names(PRECISIONS))
     evaluate.add_argument("--out", type=Path, default=None)
     evaluate.set_defaults(func=cmd_evaluate)
 
@@ -256,6 +274,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     encode.add_argument("--topk", type=int, default=0, help="also return the top k candidates per codebook")
     encode.set_defaults(func=cmd_encode)
+
+    bench = commands.add_parser("bench", help="measure kernel, model and end to end performance")
+    device_arg(bench)
+    bench.add_argument(
+        "--suite",
+        action="append",
+        default=None,
+        help="suite to run (repeatable): all, attention, pooling, encoder, depth, training, audio; "
+        "the default omits audio, the only suite that downloads weights",
+    )
+    bench.add_argument("--dtype", type=precision_dtype, default=torch.bfloat16, metavar=names(PRECISIONS))
+    bench.add_argument("--out", type=Path, default=Path("benchmarks"))
+    bench.add_argument("--seed", type=int, default=0)
+    bench.set_defaults(func=cmd_bench)
 
     push = commands.add_parser("push", help="upload a checkpoint folder to the Hub")
     push.add_argument("--folder", type=Path, required=True)
