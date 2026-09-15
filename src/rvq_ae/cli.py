@@ -1,0 +1,281 @@
+"""Command line entry points: cache, train, evaluate, encode, push, serve."""
+
+import argparse
+import csv
+import json
+import logging
+from collections.abc import Sequence
+from pathlib import Path
+
+import torch
+
+from rvq_ae.constants import COLLECTION, DATASET_REPO, DAV_REPO
+from rvq_ae.data.cache import DTYPES, build_cache
+from rvq_ae.data.records import load_records
+from rvq_ae.dav import load_dav
+
+log = logging.getLogger("rvq_ae")
+
+
+def device_arg(parser: argparse.ArgumentParser, default: str = "cuda") -> None:
+    parser.add_argument("--device", default=default, help="torch device, for example cuda, cuda:1 or cpu")
+
+
+def dataset_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--dataset", default=DATASET_REPO, help="Hub dataset id, local index folder or JSONL file"
+    )
+    parser.add_argument("--corpus", type=Path, default=None, help="local folder holding the data/ shard ZIPs")
+    parser.add_argument("--revision", default=None, help="dataset revision")
+    parser.add_argument("--index-limit", type=int, default=0, help="read only the first N index files")
+    parser.add_argument("--cache", type=Path, default=Path("cache/latents"), help="latent cache folder")
+
+
+def model_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--model", default=COLLECTION, help="Hub repository or local folder with the encoder")
+    parser.add_argument(
+        "--variant", default=None, help="release variant v1, v2, v3 or v4 (default v4 on the Hub)"
+    )
+    parser.add_argument(
+        "--subfolder", default=None, help="checkpoint subfolder such as final or best/checkpoint-500"
+    )
+    parser.add_argument("--dav", default=DAV_REPO, help="DAV encoder repository, folder or dav.pth file")
+    parser.add_argument("--model-revision", default=None, help="encoder repository revision")
+
+
+def cmd_cache(args: argparse.Namespace) -> None:
+    device = torch.device(args.device)
+    dav = load_dav(args.dav, device=device)
+    grouped = load_records(args.dataset, revision=args.revision, limit=args.index_limit)
+    splits = args.split or sorted(grouped)
+    records = [record for split in splits for record in grouped.get(split, [])]
+    if args.max_records > 0:
+        records = records[: args.max_records]
+    written = build_cache(
+        records,
+        root=args.cache,
+        dav=dav,
+        device=device,
+        corpus=args.corpus,
+        repo=args.dataset,
+        revision=args.revision,
+        dtype=DTYPES[args.dtype],
+        need_topk=not args.no_topk,
+        rebuild=args.rebuild,
+        rank=args.rank,
+        world=args.world,
+    )
+    log.info("wrote %d of %d records to %s", written, len(records), args.cache)
+
+
+def cmd_train(args: argparse.Namespace) -> None:
+    from rvq_ae.train import TrainConfig, train
+
+    cfg = TrainConfig.load(
+        args.config, output=args.output, resume=args.resume, device=args.device, max_steps=args.max_steps
+    )
+    train(cfg)
+
+
+def checkpoints(run: Path) -> list[tuple[str, int, Path]]:
+    """(name, step, folder) for checkpoint-N, best/checkpoint-N and final, ordered by step."""
+    from rvq_ae.hub import STATE_NAME
+
+    found: list[tuple[str, int, Path]] = []
+    for folder in list(run.glob("checkpoint-*")) + list(run.glob("best/checkpoint-*")) + [run / "final"]:
+        if not (folder / STATE_NAME).is_file():
+            continue
+        step = int(json.loads((folder / STATE_NAME).read_text(encoding="utf-8"))["step"])
+        found.append((str(folder.relative_to(run)), step, folder))
+    return sorted(found, key=lambda item: (item[1], item[0]))
+
+
+def cmd_evaluate(args: argparse.Namespace) -> None:
+    from torch.utils.data import DataLoader
+
+    from rvq_ae.data.dataset import WindowDataset, collate
+    from rvq_ae.evaluate import evaluate
+    from rvq_ae.hub import load_encoder
+
+    device = torch.device(args.device)
+    grouped = load_records(args.dataset, revision=args.revision, limit=args.index_limit)
+    records = grouped[args.split][: args.max_records] if args.max_records > 0 else grouped[args.split]
+    dataset = WindowDataset(
+        records,
+        args.cache,
+        size=args.window,
+        stride=args.window,
+        exact_only=not args.all_records,
+        need_topk=args.kl_weight > 0,
+    )
+    loader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate, num_workers=args.workers)
+    targets = checkpoints(args.run) if args.run else [(args.subfolder or args.variant or "model", 0, None)]
+    rows: list[dict[str, float | str]] = []
+    for name, step, folder in targets:
+        model = (
+            load_encoder(folder, device=device)
+            if folder is not None
+            else load_encoder(
+                args.model,
+                variant=args.variant,
+                subfolder=args.subfolder,
+                revision=args.model_revision,
+                device=device,
+            )
+        )
+        metrics = evaluate(
+            model,
+            loader,
+            device=device,
+            kl_weight=args.kl_weight,
+            tau=args.tau,
+            precision=args.precision,
+            max_batches=args.max_batches,
+        )
+        rows.append({"checkpoint": name, "step": step, **metrics})
+        log.info("%s step %d: %s", name, step, json.dumps({k: round(v, 4) for k, v in metrics.items()}))
+    out = args.out or (args.run / "evaluation" if args.run else Path("evaluation"))
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "metrics.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    with (out / "metrics.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    log.info("wrote %s", out)
+
+
+def cmd_encode(args: argparse.Namespace) -> None:
+    from safetensors.torch import save_file
+
+    from rvq_ae.audio import load_audio
+    from rvq_ae.inference import CodeEncoder
+
+    codec = CodeEncoder.load(
+        args.model,
+        variant=args.variant,
+        subfolder=args.subfolder,
+        dav=args.dav,
+        device=args.device,
+        revision=args.model_revision,
+    )
+    audio, rate = load_audio(args.audio)
+    result = codec.encode(audio, rate, topk=args.topk)
+    if args.out is None:
+        print(json.dumps(result.to_dict()))
+    elif args.out.suffix == ".safetensors":
+        tensors = {"codes": result.codes, "confidence": result.confidence}
+        if result.candidates is not None:
+            tensors["candidates"] = result.candidates
+        save_file(tensors, args.out)
+    else:
+        args.out.write_text(json.dumps(result.to_dict()) + "\n", encoding="utf-8")
+    log.info("%d frames (%.2f s) from %s", result.frames, result.frames / 25, args.audio)
+
+
+def cmd_push(args: argparse.Namespace) -> None:
+    from rvq_ae.hub import push_folder
+
+    url = push_folder(
+        args.folder, args.repo, path_in_repo=args.path_in_repo, private=args.private, message=args.message
+    )
+    log.info("uploaded %s to %s", args.folder, url)
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    import uvicorn
+
+    from rvq_ae.server.app import Settings, create_app
+
+    settings = Settings(
+        model=args.model,
+        variant=args.variant,
+        subfolder=args.subfolder,
+        dav=args.dav,
+        revision=args.model_revision,
+        device=args.device,
+        max_seconds=args.max_seconds,
+    )
+    uvicorn.run(create_app(settings), host=args.host, port=args.port)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="rvq-ae", description="Open RVQ encoder for MiniMax Music 3")
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    cache = commands.add_parser("cache", help="encode dataset audio to DAV latents")
+    dataset_args(cache)
+    device_arg(cache)
+    cache.add_argument("--dav", default=DAV_REPO)
+    cache.add_argument("--split", action="append", help="split to cache (repeatable); default all")
+    cache.add_argument("--max-records", type=int, default=0)
+    cache.add_argument("--dtype", choices=sorted(DTYPES), default="bfloat16")
+    cache.add_argument("--no-topk", action="store_true", help="accept caches without teacher top k tensors")
+    cache.add_argument("--rebuild", action="store_true")
+    cache.add_argument(
+        "--rank", type=int, default=0, help="this worker's index when caching on several machines"
+    )
+    cache.add_argument("--world", type=int, default=1, help="number of caching workers")
+    cache.set_defaults(func=cmd_cache)
+
+    train = commands.add_parser("train", help="train an encoder (launch with torchrun for several GPUs)")
+    train.add_argument("--config", type=Path, required=True, help="training JSON, see configs/")
+    train.add_argument("--output", default=None)
+    train.add_argument("--resume", default=None, help="checkpoint folder to resume from")
+    train.add_argument("--max-steps", type=int, default=None)
+    device_arg(train)
+    train.set_defaults(func=cmd_train)
+
+    evaluate = commands.add_parser("evaluate", help="score checkpoints on a cached split")
+    dataset_args(evaluate)
+    model_args(evaluate)
+    device_arg(evaluate)
+    evaluate.add_argument(
+        "--run", type=Path, default=None, help="training output folder; scores every checkpoint"
+    )
+    evaluate.add_argument("--split", default="holdout")
+    evaluate.add_argument("--max-records", type=int, default=0)
+    evaluate.add_argument(
+        "--all-records", action="store_true", help="include records without exact alignment"
+    )
+    evaluate.add_argument("--window", type=int, default=128)
+    evaluate.add_argument("--batch-size", type=int, default=16)
+    evaluate.add_argument("--workers", type=int, default=4)
+    evaluate.add_argument("--max-batches", type=int, default=0)
+    evaluate.add_argument("--kl-weight", type=float, default=0.25)
+    evaluate.add_argument("--tau", type=float, default=1.0)
+    evaluate.add_argument("--precision", choices=("fp32", "bf16"), default="fp32")
+    evaluate.add_argument("--out", type=Path, default=None)
+    evaluate.set_defaults(func=cmd_evaluate)
+
+    encode = commands.add_parser("encode", help="encode one audio file to codes")
+    model_args(encode)
+    device_arg(encode)
+    encode.add_argument("--audio", type=Path, required=True)
+    encode.add_argument(
+        "--out", type=Path, default=None, help=".safetensors or .json; prints JSON when omitted"
+    )
+    encode.add_argument("--topk", type=int, default=0, help="also return the top k candidates per codebook")
+    encode.set_defaults(func=cmd_encode)
+
+    push = commands.add_parser("push", help="upload a checkpoint folder to the Hub")
+    push.add_argument("--folder", type=Path, required=True)
+    push.add_argument("--repo", required=True)
+    push.add_argument("--path-in-repo", default="")
+    push.add_argument("--private", action="store_true")
+    push.add_argument("--message", default="Add RVQ encoder checkpoint")
+    push.set_defaults(func=cmd_push)
+
+    serve = commands.add_parser("serve", help="run the HTTP service")
+    model_args(serve)
+    device_arg(serve, default="auto")
+    serve.add_argument("--host", default="0.0.0.0")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--max-seconds", type=float, default=360.0)
+    serve.set_defaults(func=cmd_serve)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    args = build_parser().parse_args(argv)
+    args.func(args)

@@ -1,0 +1,33 @@
+# agent instruction files
+CLAUDE.md
+AGENTS.md
+CODE.md
+.claude/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# data, caches, runs
+cache/
+output/
+runs/
+wandb/
+*.safetensors
+*.pt
+*.bsh
+!tests/data/*.safetensors
+
+# editors and OS
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,144 @@
+"""DAV latent cache: one safetensors file plus a JSON sidecar per track.
+
+Audio is decoded from the shard, encoded once through the frozen DAV encoder and stored as
+[latent_frames, 128] together with the sampled codes and the teacher top k tensors, so training
+never touches audio again.
+"""
+
+import json
+import os
+import zipfile
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
+
+import torch
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load as load_bytes
+from safetensors.torch import save_file
+from torch import Tensor
+
+from rvq_ae.alignment import frame_bounds
+from rvq_ae.audio import load_audio, resample
+from rvq_ae.constants import CACHE_FORMAT, DATASET_REPO
+from rvq_ae.data.records import Record
+from rvq_ae.dav import DavEncoder
+
+DTYPES = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16}
+
+
+def cache_paths(root: Path, record: Record) -> tuple[Path, Path]:
+    folder = root / f"{record.shard_id // 1000:05d}"
+    return folder / f"{record.stem}.safetensors", folder / f"{record.stem}.json"
+
+
+def read_meta(root: Path, record: Record) -> dict[str, Any]:
+    return dict(json.loads(cache_paths(root, record)[1].read_text(encoding="utf-8")))
+
+
+def cached(root: Path, record: Record, *, need_topk: bool) -> bool:
+    tensors, meta = cache_paths(root, record)
+    if not (tensors.is_file() and meta.is_file()):
+        return False
+    values = read_meta(root, record)
+    return values.get("format") == CACHE_FORMAT and (values.get("has_topk", False) or not need_topk)
+
+
+def shard_file(
+    record: Record, *, corpus: Path | None, repo: str = DATASET_REPO, revision: str | None = None
+) -> Path:
+    if corpus is not None:
+        path = corpus / record.shard_path
+        if not path.is_file():
+            raise FileNotFoundError(f"{path} not found")
+        return path
+    return Path(hf_hub_download(repo, record.shard_path, repo_type="dataset", revision=revision))
+
+
+def read_shard(shard: Path, record: Record) -> tuple[Tensor, int, dict[str, Tensor]]:
+    """Waveform [channels, samples], its sample rate and the prediction tensors of one shard."""
+    with zipfile.ZipFile(shard) as archive:
+        audio, rate = load_audio(archive.read(record.audio_file))
+        tensors = load_bytes(archive.read(record.tensor_file))
+    return audio, rate, tensors
+
+
+def atomic_write(path: Path, write: Any) -> None:
+    temp = path.with_name(path.name + ".tmp")
+    write(temp)
+    os.replace(temp, path)
+
+
+@torch.no_grad()
+def encode_record(
+    record: Record,
+    *,
+    dav: DavEncoder,
+    shard: Path,
+    root: Path,
+    device: torch.device,
+    dtype: torch.dtype = torch.bfloat16,
+) -> dict[str, Any]:
+    audio, rate, tensors = read_shard(shard, record)
+    audio = resample(audio, rate, dav.sample_rate)
+    latents = dav.encode(audio.to(device))[0].transpose(0, 1).to("cpu", dtype).contiguous()
+    codes = tensors["codes"].to(torch.int16)
+    if codes.ndim != 2 or codes.shape[1] != len(record.vocab_sizes):
+        raise ValueError(
+            f"{record.stem}: codes must be [rows, {len(record.vocab_sizes)}], got {tuple(codes.shape)}"
+        )
+    payload: dict[str, Tensor] = {"latents": latents, "codes": codes}
+    has_topk = "teacher_topk_ids" in tensors
+    if has_topk != ("teacher_topk_logits" in tensors):
+        raise ValueError(f"{record.stem}: teacher_topk_ids and teacher_topk_logits must both be present")
+    if has_topk:
+        payload["teacher_topk_ids"] = tensors["teacher_topk_ids"].to(torch.int32)
+        payload["teacher_topk_logits"] = tensors["teacher_topk_logits"].to(dtype)
+    frames = min(record.emitted_frames, int(codes.shape[0]) - record.offset)
+    meta = {
+        "format": CACHE_FORMAT,
+        "record": record.stem,
+        "latent_frames": int(latents.shape[0]),
+        "latent_channels": int(latents.shape[1]),
+        "code_frames": int(codes.shape[0]),
+        "has_topk": has_topk,
+        "topk": int(payload["teacher_topk_ids"].shape[-1]) if has_topk else 0,
+        "exact": record.exact,
+        "mapped_latent_frames": frame_bounds(max(frames, 1), record.chunks)[-1],
+        "dtype": str(dtype).removeprefix("torch."),
+    }
+    tensors_path, meta_path = cache_paths(root, record)
+    tensors_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(tensors_path, lambda temp: save_file(payload, temp, metadata={"format": CACHE_FORMAT}))
+    atomic_write(meta_path, lambda temp: temp.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8"))
+    return meta
+
+
+def build_cache(
+    records: Sequence[Record],
+    *,
+    root: Path,
+    dav: DavEncoder,
+    device: torch.device,
+    corpus: Path | None = None,
+    repo: str = DATASET_REPO,
+    revision: str | None = None,
+    dtype: torch.dtype = torch.bfloat16,
+    need_topk: bool = False,
+    rebuild: bool = False,
+    rank: int = 0,
+    world: int = 1,
+    progress: bool = True,
+) -> int:
+    """Encode this rank's share (index modulo world) of the records; returns how many were written."""
+    from tqdm.auto import tqdm
+
+    todo = [record for index, record in enumerate(records) if index % world == rank]
+    written = 0
+    for record in tqdm(todo, desc=f"latent cache rank {rank}", disable=not progress):
+        if not rebuild and cached(root, record, need_topk=need_topk):
+            continue
+        shard = shard_file(record, corpus=corpus, repo=repo, revision=revision)
+        encode_record(record, dav=dav, shard=shard, root=root, device=device, dtype=dtype)
+        written += 1
+    return written

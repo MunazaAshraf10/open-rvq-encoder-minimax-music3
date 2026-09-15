@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: If you use this software, please cite it as below.
+title: "RVQ AE for MiniMax Music 3: an open audio to RVQ code encoder"
+type: software
+version: 0.1.0
+date-released: 2026-09-15
+license: AGPL-3.0-only
+repository-code: https://github.com/MunazaAshraf10/open-rvq-encoder-minimax-music3
+authors:
+  - family-names: Ashraf
+    given-names: Munaza
+  - name: bghira
+keywords:
+  - audio
+  - music
+  - residual vector quantization
+  - MiniMax Music 3
+  - muP

@@ -1,0 +1,85 @@
+[project]
+name = "rvq-ae-minimax-m3"
+version = "0.1.0"
+description = "Open audio to RVQ code encoder for MiniMax Music 3"
+readme = "README.md"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+authors = [
+  { name = "Munaza Ashraf" },
+  { name = "bghira" },
+]
+keywords = ["audio", "music", "rvq", "minimax", "codec", "mup"]
+classifiers = [
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Multimedia :: Sound/Audio",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "torch>=2.14",
+  "numpy>=2.3",
+  "safetensors>=0.8",
+  "huggingface-hub>=1.31",
+  "soundfile>=0.14",
+  "soxr>=1.0",
+  "tqdm>=4.67",
+]
+
+[project.optional-dependencies]
+serve = [
+  "fastapi>=0.141",
+  "uvicorn[standard]>=0.53",
+  "python-multipart>=0.0.32",
+  "pydantic>=2.13",
+]
+train = ["wandb>=0.25"]
+dev = [
+  "pytest>=9.1",
+  "pytest-cov>=7.1",
+  "ruff>=0.16",
+  "mypy>=2.3",
+  "httpx2>=2.13",
+]
+
+[project.scripts]
+rvq-ae = "rvq_ae.cli:main"
+
+[project.urls]
+Repository = "https://github.com/MunazaAshraf10/open-rvq-encoder-minimax-music3"
+Weights = "https://huggingface.co/SimpleTuner/open-rvq-encoder-minimax-music3"
+Dataset = "https://huggingface.co/datasets/bghira/minimax-music3-rvq-reverse-distillation"
+
+[build-system]
+requires = ["hatchling>=1.32"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rvq_ae"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "N", "RUF"]
+ignore = ["N812"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rvq_ae"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_return_any = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["rvq_ae"]
