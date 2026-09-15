@@ -59,7 +59,7 @@ log p_S(i)) over the valid stored ids at tau = 1. The shared encoder follows muP
 m = d / 128): readouts compute W (x / m) + b, attention logits scale by 8 / d_head, and matrix like
 weights take learning rate / m and weight decay x m; the base width is part of the config.
 
-Training data: bghira/minimax-music3-rvq-reverse-distillation, 2,972 generated tracks with their
+Training data: the [reverse distillation corpus](https://huggingface.co/datasets/bghira/minimax-music3-rvq-reverse-distillation), 2,972 generated tracks with their
 sampled codes, teacher top 50 ids and logits, and the chunk stitching table (about 178 GB).
 
 ## Benchmarks
@@ -80,7 +80,7 @@ with rvq-ae bench.
 
 Python 3.13 and uv:
 
-    git clone https://github.com/MunazaAshraf10/open-rvq-encoder-minimax-music3
+    git clone https://github.com/MunazaAshraf10/open-rvq-encoder-minimax-music3.git
     cd open-rvq-encoder-minimax-music3
     uv sync --all-extras
 
@@ -130,11 +130,12 @@ stitching table the nominal timeline above is used rather than a fixed 441 / 128
 
 ## Links
 
-- Weights: https://huggingface.co/SimpleTuner/open-rvq-encoder-minimax-music3
-- DAV encoder: https://huggingface.co/SimpleTuner/MiniMax-Music-3-Encoder
-- Dataset: https://huggingface.co/datasets/bghira/minimax-music3-rvq-reverse-distillation
-- MiniMax Music 3: https://huggingface.co/MiniMaxAI/MiniMax-Music3
-- SimpleTuner: https://github.com/bghira/SimpleTuner
+- [Weights](https://huggingface.co/SimpleTuner/open-rvq-encoder-minimax-music3) on the Hub
+- [DAV encoder](https://huggingface.co/SimpleTuner/MiniMax-Music-3-Encoder)
+- [Dataset](https://huggingface.co/datasets/bghira/minimax-music3-rvq-reverse-distillation)
+- [MiniMax Music 3](https://huggingface.co/MiniMaxAI/MiniMax-Music3)
+- [SimpleTuner](https://github.com/bghira/SimpleTuner)
+- [Munaza Ashraf](https://www.linkedin.com/in/munaza-ashraf-713625417/) and [bghira](https://github.com/bghira)
 
 ## Citation
 
