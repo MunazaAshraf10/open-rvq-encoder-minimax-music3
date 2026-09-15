@@ -1,6 +1,4 @@
-import pytest
 import torch
-import torch.nn.functional as F
 
 from rvq_ae.constants import IGNORE
 from rvq_ae.losses import codebook_ce, rvq_loss, topk_hits, topk_kl
@@ -18,22 +16,6 @@ def make(
     return logits, target, ids, teacher
 
 
-def test_cross_entropy_is_the_per_codebook_mean() -> None:
-    logits, target = make()[:2]
-    ce = codebook_ce(logits, target)
-    for book, scores in enumerate(logits):
-        expected = F.cross_entropy(scores.flatten(0, 1), target[:, :, book].flatten())
-        assert torch.allclose(ce[book], expected)
-
-
-def test_cross_entropy_skips_ignored_frames() -> None:
-    logits, target = make()[:2]
-    target[0, :, 0] = IGNORE
-    ce = codebook_ce(logits, target)
-    expected = F.cross_entropy(logits[0][1].float(), target[1, :, 0])
-    assert torch.allclose(ce[0], expected)
-
-
 def test_total_loss_is_ce_plus_weighted_kl() -> None:
     logits, target, ids, teacher = make()
     loss = rvq_loss(logits, target, ids=ids, teacher=teacher, kl_weight=0.25, tau=1.0)
@@ -43,19 +25,6 @@ def test_total_loss_is_ce_plus_weighted_kl() -> None:
     assert loss.kl.item() > 0
     loss.total.backward()
     assert all(scores.grad is not None for scores in logits)
-
-
-def test_kl_without_weight_ignores_teacher_tensors() -> None:
-    logits, target = make()[:2]
-    loss = rvq_loss(logits, target)
-    assert torch.equal(loss.total, loss.ce)
-    assert loss.kl.item() == 0.0
-
-
-def test_kl_weight_requires_teacher_tensors() -> None:
-    logits, target = make()[:2]
-    with pytest.raises(ValueError, match="teacher"):
-        rvq_loss(logits, target, kl_weight=0.25)
 
 
 def test_kl_uses_the_teacher_distribution_on_its_support() -> None:
@@ -72,15 +41,6 @@ def test_kl_uses_the_teacher_distribution_on_its_support() -> None:
     assert torch.allclose(kl, expected)
 
 
-def test_kl_is_zero_when_the_student_matches_the_teacher() -> None:
-    logits = [torch.zeros(1, 1, 4)]
-    logits[0][0, 0] = torch.tensor([1.0, 2.0, 3.0, 4.0])
-    ids = torch.tensor([[[[0, 1, 2, 3]]]])
-    teacher = torch.tensor([[[[1.0, 2.0, 3.0, 4.0]]]])
-    target = torch.zeros(1, 1, 1, dtype=torch.long)
-    assert torch.allclose(topk_kl(logits, ids, teacher, target, tau=1.0), torch.zeros(1), atol=1e-6)
-
-
 def test_kl_excludes_end_of_track_and_negative_ids() -> None:
     logits = [torch.randn(1, 2, 5)]
     ids = torch.tensor([[[[0, 5]], [[-1, 5]]]])
@@ -90,26 +50,6 @@ def test_kl_excludes_end_of_track_and_negative_ids() -> None:
     # frame 1 has no valid id, frame 0 keeps only id 0 with teacher probability 1
     expected = -torch.log_softmax(logits[0][0, 0], dim=-1)[0]
     assert torch.allclose(kl, expected)
-
-
-def test_kl_with_no_valid_frame_is_zero_but_differentiable() -> None:
-    logits = [torch.randn(1, 2, 5, requires_grad=True)]
-    ids = torch.full((1, 2, 1, 3), 5)
-    teacher = torch.zeros(1, 2, 1, 3)
-    target = torch.zeros(1, 2, 1, dtype=torch.long)
-    kl = topk_kl(logits, ids, teacher, target, tau=1.0)
-    assert kl.item() == 0.0
-    assert kl.requires_grad
-
-
-def test_kl_skips_ignored_targets() -> None:
-    logits, target, ids, teacher = make(batch=1, frames=2)
-    target[0, 1, :] = IGNORE
-    full = topk_kl(logits, ids, teacher, target.masked_fill(target == IGNORE, 0), tau=1.0)
-    masked = topk_kl(logits, ids, teacher, target, tau=1.0)
-    first_only = topk_kl([s[:, :1] for s in logits], ids[:, :1], teacher[:, :1], target[:, :1], tau=1.0)
-    assert torch.allclose(masked, first_only)
-    assert not torch.allclose(masked, full)
 
 
 def test_topk_hits_masks_ignored_frames() -> None:

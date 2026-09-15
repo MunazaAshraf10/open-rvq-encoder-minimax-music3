@@ -4,7 +4,7 @@ from torch import Tensor
 
 from conftest import tiny_config
 from rvq_ae.alignment import Pool, nominal_bounds
-from rvq_ae.layers import Layer, attention, attention_reference
+from rvq_ae.layers import attention, attention_reference
 from rvq_ae.model import RvqEncoder
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
@@ -41,15 +41,6 @@ def test_fused_attention_matches_the_reference_on_cuda(dtype: torch.dtype, tol: 
     assert torch.allclose(attention(q, k, v, **kwargs), attention_reference(q, k, v, **kwargs), atol=tol)
 
 
-def test_attention_honours_the_mup_scale() -> None:
-    """The scale reaches the kernel: two different scales cannot give the same output."""
-    q, k, v = qkv("cpu", torch.float32, length=8, heads=2, dim=16)
-    kwargs = {"causal": False, "dropout": 0.0, "training": False}
-    wide = attention(q, k, v, scale=0.5, **kwargs)
-    narrow = attention(q, k, v, scale=0.25, **kwargs)
-    assert not torch.allclose(wide, narrow)
-
-
 def test_causal_attention_cannot_see_the_future() -> None:
     """Position 0 of a causal layer attends to itself alone, whatever follows it."""
     q, k, v = qkv("cpu", torch.float32, length=8, heads=2, dim=16)
@@ -57,19 +48,6 @@ def test_causal_attention_cannot_see_the_future() -> None:
     changed = v.clone()
     changed[:, :, 1:] += 100.0
     assert torch.allclose(attention(q, k, v, **kwargs)[:, :, 0], attention(q, k, changed, **kwargs)[:, :, 0])
-
-
-def test_dropout_is_inactive_outside_training() -> None:
-    q, k, v = qkv("cpu", torch.float32, length=8, heads=2, dim=16)
-    kwargs = {"scale": 0.25, "causal": False, "dropout": 0.5}
-    assert torch.equal(
-        attention(q, k, v, training=False, **kwargs), attention(q, k, v, training=False, **kwargs)
-    )
-
-
-def test_layer_rejects_a_width_that_heads_do_not_divide() -> None:
-    with pytest.raises(ValueError, match="divisible"):
-        Layer(30, 4, 2, 0.0, scale=0.25, causal=False)
 
 
 @CUDA

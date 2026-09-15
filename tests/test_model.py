@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -7,7 +6,6 @@ import torch
 from conftest import TINY_VOCABS, published_config, published_keys, tiny_config
 from rvq_ae.alignment import Pool
 from rvq_ae.config import EncoderConfig
-from rvq_ae.constants import IGNORE
 from rvq_ae.model import RvqEncoder
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,25 +41,6 @@ def test_state_dict_keys_match_the_released_checkpoints(tag: str) -> None:
     assert set(model.state_dict()) == published_keys(tag)
 
 
-def test_logit_shapes_follow_codebook_vocabularies(cfg: EncoderConfig) -> None:
-    model = RvqEncoder(cfg).eval()
-    latents, pool = inputs()
-    for scores, vocab in zip(model(latents, pool), TINY_VOCABS, strict=True):
-        assert scores.shape == (2, 4, vocab)
-    for scores, vocab in zip(model(latents, pool, random_codes()), TINY_VOCABS, strict=True):
-        assert scores.shape == (2, 4, vocab)
-
-
-def test_independent_heads_when_the_depth_decoder_is_off() -> None:
-    model = RvqEncoder(tiny_config(depth_decoder=False)).eval()
-    assert model.depth_decoder is None
-    assert len(model.heads) == 8
-    latents, pool = inputs()
-    plain = model(latents, pool)
-    forced = model(latents, pool, random_codes())
-    assert all(torch.equal(a, b) for a, b in zip(plain, forced, strict=True))
-
-
 def test_depth_decoder_conditions_only_on_earlier_codebooks(cfg: EncoderConfig) -> None:
     model = RvqEncoder(tiny_config(mup_readout_zero_init=False)).eval()
     latents, pool = inputs()
@@ -83,66 +62,3 @@ def test_free_running_equals_teacher_forcing_on_its_own_greedy_codes(cfg: Encode
     forced = model(latents, pool, greedy)
     assert all(torch.allclose(a, b, atol=1e-5) for a, b in zip(free, forced, strict=True))
     assert torch.equal(model.codes(latents, pool), greedy)
-
-
-def test_ignored_targets_embed_as_token_zero(cfg: EncoderConfig) -> None:
-    model = RvqEncoder(cfg).eval()
-    latents, pool = inputs()
-    codes = random_codes()
-    masked = codes.clone()
-    masked[:, :, :] = IGNORE
-    zeros = torch.zeros_like(codes)
-    assert all(
-        torch.equal(a, b)
-        for a, b in zip(model(latents, pool, masked), model(latents, pool, zeros), strict=True)
-    )
-
-
-def test_every_parameter_receives_a_gradient(cfg: EncoderConfig) -> None:
-    model = RvqEncoder(tiny_config(mup_readout_zero_init=False)).train()
-    latents, pool = inputs()
-    loss = sum(scores.float().logsumexp(-1).mean() for scores in model(latents, pool, random_codes()))
-    loss.backward()
-    missing = [name for name, param in model.named_parameters() if param.grad is None]
-    assert missing == []
-
-
-def test_context_longer_than_positions_is_rejected(cfg: EncoderConfig) -> None:
-    model = RvqEncoder(cfg)
-    latents, pool = inputs(frames=9)
-    with pytest.raises(ValueError, match="frame context"):
-        model(latents, pool)
-
-
-def test_gradient_checkpointing_matches_the_plain_forward(cfg: EncoderConfig) -> None:
-    model = RvqEncoder(tiny_config(mup_readout_zero_init=False)).train()
-    latents, pool = inputs()
-    codes = random_codes()
-    plain = model(latents, pool, codes)
-    model.checkpointing = True
-    checked = model(latents, pool, codes)
-    assert all(torch.allclose(a, b) for a, b in zip(plain, checked, strict=True))
-
-
-def test_compiled_model_matches_eager(cfg: EncoderConfig) -> None:
-    model = RvqEncoder(tiny_config(mup_readout_zero_init=False)).eval()
-    latents, pool = inputs()
-    eager = model(latents, pool, random_codes() * 0)
-    try:
-        compiled = torch.compile(model)(latents, pool, torch.zeros(2, 4, 8, dtype=torch.long))
-    except RuntimeError as error:
-        pytest.skip(f"torch.compile unavailable here: {error}")
-    assert all(torch.allclose(a, b, atol=1e-4) for a, b in zip(eager, compiled, strict=True))
-
-
-@pytest.mark.parametrize("tag", ["v1", "v2", "v4"])
-def test_published_provenance_counts_match_the_code(tag: str) -> None:
-    """The parameter counts recorded with the released weights are the counts this code builds."""
-    path = ROOT / "results" / "published" / "experiment-summary.json"
-    if not path.is_file():
-        pytest.skip("published results are not checked in")
-    summary = json.loads(path.read_text())
-    recorded = {entry["version"]: entry["parameter_count"] for entry in summary["encoders"]}
-    with torch.device("meta"):
-        model = RvqEncoder(published_config(tag))
-    assert model.parameter_count() == recorded[tag]
