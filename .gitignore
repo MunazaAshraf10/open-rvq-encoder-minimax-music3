@@ -19,7 +19,6 @@ htmlcov/
 
 # data, caches, runs
 cache/
-results/**/*.log
 output/
 runs/
 wandb/
