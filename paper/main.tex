@@ -1,0 +1,88 @@
+\documentclass[twocolumn,10pt]{article}
+
+\usepackage[margin=0.75in,top=0.9in,bottom=0.9in,columnsep=0.25in]{geometry}
+\usepackage{newtxtext,newtxmath}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{adjustbox}
+\usepackage{placeins}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\usepackage{csquotes}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{caption}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\definecolor{cvprblue}{rgb}{0.21,0.49,0.74}
+\usepackage[pagebackref,colorlinks=true,linkcolor=cvprblue,citecolor=cvprblue,urlcolor=cvprblue]{hyperref}
+
+\setcounter{topnumber}{1}
+\setcounter{bottomnumber}{1}
+\setcounter{dbltopnumber}{1}
+\setcounter{totalnumber}{2}
+\renewcommand{\topfraction}{0.8}
+\renewcommand{\bottomfraction}{0.5}
+\renewcommand{\dbltopfraction}{0.8}
+\renewcommand{\textfraction}{0.15}
+\renewcommand{\floatpagefraction}{0.85}
+
+\captionsetup{font=small,labelsep=period,labelfont=normalfont}
+\setlength{\abovecaptionskip}{4pt}
+\setlength{\belowcaptionskip}{2pt}
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection.}{0.6em}{}
+\titlespacing*{\section}{0pt}{12pt plus 2pt minus 2pt}{6pt}
+\titlespacing*{\subsection}{0pt}{8pt plus 2pt minus 2pt}{4pt}
+\renewcommand{\abstractname}{\normalsize\bfseries Abstract}
+\renewenvironment{abstract}{\begin{center}\abstractname\end{center}\itshape\noindent\ignorespaces}{\par}
+\renewcommand*{\backref}[1]{}
+\renewcommand*{\backrefalt}[4]{\ifcase #1 \or #2\else #2\fi}
+
+\title{\vspace{-1.6em}\Large\bfseries Reverse Engineering the RVQ Audio Encoder of MiniMax Music 3 via Reverse Distillation}
+\author{
+  \begin{tabular}{c@{\hspace{3em}}c}
+    Munaza Ashraf\textsuperscript{1} & Bghira\textsuperscript{2}
+  \end{tabular}\\[0.5em]
+  {\small \textsuperscript{1}\href{https://github.com/MunazaAshraf10}{github.com/MunazaAshraf10}\quad
+  \textsuperscript{2}\href{https://github.com/bghira/SimpleTuner}{github.com/bghira/SimpleTuner}}
+}
+\date{}
+
+\begin{document}
+\maketitle
+
+\input{sections/abstract}
+\input{sections/introduction}
+\input{sections/related}
+\input{sections/representation}
+\input{sections/methodology}
+\input{sections/encoder}
+\input{sections/setup}
+\input{sections/results}
+\input{sections/analysis}
+\input{sections/discussion}
+\input{sections/limitations}
+\input{sections/conclusion}
+
+\FloatBarrier
+{\small
+\bibliographystyle{plainnat}
+\bibliography{refs}
+}
+
+\clearpage
+\twocolumn[{
+  \centering
+  {\Large\bfseries Reverse Engineering the RVQ Audio Encoder of MiniMax Music 3 via Reverse Distillation\par}
+  \vspace{0.4em}
+  {\Large\bfseries Supplementary Material\par}
+  \vspace{1.6em}
+}]
+\input{sections/appendix}
+
+\end{document}

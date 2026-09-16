@@ -1,0 +1,33 @@
+\section{Reverse-Engineering Methodology}
+\label{sec:methodology}
+
+
+\subsection{Temporal resolution analysis}
+\label{sec:timeline}
+
+Let $n$ be the number of frames of a track. Frame $t$ covers a span $[s_t, s_{t+1})$ of stitched latents, and the $n+1$ boundaries $s_0 \le \dots \le s_n$ are the entire contract between the two timelines (Fig.~\ref{fig:timeline}).
+
+\paragraph{Exact rule.} From the generator's stitching table, chunk 0 owns frames $[f_0, f_1 + 25)$, chunk $i > 0$ owns $[f_i + 25, f_{i+1} + 25)$, and the last chunk owns through its own end. A chunk that owns $\mathit{owned}$ frames starting at frame $g_0$ and that kept $\mathit{kept}$ latents $[a, b)$ maps its frame $g$ to $s_g = a + \lceil (g - g_0)\,\mathit{kept} / \mathit{owned} \rceil$, and a later chunk rewrites the boundary it shares with the previous one.
+
+\paragraph{Nominal rule.} A reference recording carries no stitching table, so inference must reconstruct the timeline from the frame count alone. With $W = \max(1, \lfloor (n-1)/100 \rfloor)$ chunks, frame $f$ belongs to chunk $c = \mathrm{clamp}(\lfloor (f-25)/100 \rfloor, 0, W-1)$; a chunk of $cf = \min(200, n - 100c)$ frames yields $cl = \lfloor cf \cdot 441/128 \rfloor$ latents, and with $lf = f - 100c$,
+\begin{equation}
+  s_f = 345\,c + \left\lceil \frac{lf \cdot cl}{cf} \right\rceil .
+  \label{eq:nominal}
+\end{equation}
+The rule gives $s_{100} = 345$, $s_{200} = 690$, $s_{4500} = 15{,}524$, and every span holds three or four latents; it agrees with the stitching tables on every full chunk and interpolates the shorter last chunk. A fixed stride of 3.4453125 places frame 4,500 at latent 15,504, twenty latents and almost six frames early. The 345-latent hop, the priming row and the last-chunk rule were also identified independently by a community encoder~\cite{serveurperso2026encoder}, so the contract is a property of the generator rather than of our reading of it.
+
+\subsection{Latent representation analysis}
+
+The DAV encoder maps 44.1 kHz audio to 1,024 channels at hop 512 and a posterior mean of 64 channels per stereo side, 128 channels at 86.1328125 Hz, left channels first. We use these posterior means, not a mel spectrogram, as the encoder input: they are the representation the diffusion transformer already consumes, and re-encoding the generated waveform through the frozen DAV encoder reproduces the generator's stored latents with 0.986 mean cosine at zero lag, so the input side of the inverse map is essentially exact. The stored flow latents themselves are not used for training because a real recording would not have them.
+
+\subsection{Quantiser structure identification}
+
+The observable code stream has one semantic codebook of 16,384 entries plus an end-of-track id 16,384 that never appears in audio, and seven acoustic codebooks of 1,024 entries. Row 0 of every stored code tensor is a priming row that was never emitted, so semantic frame $i$ is supervised by row $i+1$. The depth decoder that produces the acoustic codes is a two-layer causal transformer over the depth axis with a key-value cache, which fixes the direction of dependence: codebook $k$ is drawn conditioned on the language-model state and codebooks $0$ to $k-1$, never on later ones.
+
+\subsection{Codebook analysis}
+
+Because the codebook entries are never observed, the codebooks can only be analysed through their behaviour. Two facts emerge from training independent readouts (Sec.~\ref{sec:analysis}): top-1 agreement declines monotonically with depth, from 11 to 12\% at codebook 1 to under 3\% at codebook 7, and the same audio supports many code tuples that condition the generator identically, so exact agreement with the one sampled tuple is bounded well below the agreement that would matter downstream. Both facts point to a decoder that is conditioned across depth rather than seven independent classifiers.
+
+\subsection{Architecture inference}
+
+From the above we infer the shape of the missing encoder: a front end at the latent rate with a receptive field of a few frames, a pooling step that follows the stitched timeline exactly, a bidirectional context model over a window, a semantic readout, and a decoder over depth that mirrors the generator's own. Section~\ref{sec:encoder} instantiates that inference.

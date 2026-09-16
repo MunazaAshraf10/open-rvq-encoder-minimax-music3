@@ -1,0 +1,28 @@
+\begin{tikzpicture}[
+  node distance=4mm and 7mm,
+  box/.style={draw,rounded corners=1pt,align=center,font=\scriptsize,inner sep=2.5pt,minimum height=5.5mm,text width=17mm},
+  frozen/.style={box,fill=black!6},
+  ours/.style={box,fill=blue!8},
+  official/.style={box,fill=orange!10},
+  arr/.style={-{Latex[length=1.6mm]},thick},
+  lab/.style={font=\scriptsize,text=black!70}
+]
+\node[frozen] (wav) {waveform\\44.1 kHz stereo};
+\node[frozen,right=of wav] (dav) {DAV encoder\\(frozen)};
+\node[ours,right=of dav] (stem) {stem and\\3 dilated blocks};
+\node[ours,right=of stem] (pool) {pooling $P$\\latents to frames};
+\node[ours,below=of pool] (tr) {8 pre norm layers\\width $d$};
+\node[ours,left=of tr] (sem) {semantic readout\\16,384 way};
+\node[ours,left=of sem] (depth) {causal depth\\decoder, 7 heads};
+\node[frozen,left=of depth] (codes) {codes\\$[n, 8]$};
+\draw[arr] (wav) -- (dav);
+\draw[arr] (dav) -- (stem);
+\draw[arr] (stem) -- (pool);
+\draw[arr] (pool) -- node[lab,right=1pt]{$[T,d]$} (tr);
+\draw[arr] (tr) -- (sem);
+\draw[arr] (sem) -- node[lab,above=1pt]{$c_0$} (depth);
+\draw[arr] (tr.south) to[out=-90,in=-90,looseness=0.6] node[lab,below=1pt]{frame context $y_t$} (depth.south);
+\draw[arr] (depth) -- (codes);
+\node[official,below=9mm of codes,text width=40mm,anchor=north west] at ([xshift=-2mm]codes.south west) (lm) {official language model, RVQ depth decoder and condition encoder: replay evaluation only};
+\draw[arr,dashed] (codes.south) -- (lm.north -| codes.south);
+\end{tikzpicture}

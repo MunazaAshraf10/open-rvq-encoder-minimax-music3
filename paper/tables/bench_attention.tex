@@ -1,0 +1,22 @@
+\begin{table}[tb]
+\centering
+\small
+\caption{Benchmark suite: attention.}
+\label{tab:bench_attention}
+\adjustbox{max width=\columnwidth}{
+\begin{tabular}{lrrrr}
+\toprule
+Case & Variant & ms & Peak MiB & Note \\
+\midrule
+temporal (b16, 17h, len 128) forward & reference & 0.238 & 73.9 &  \\
+temporal (b16, 17h, len 128) backward & reference & 0.880 & 118.0 &  \\
+temporal (b16, 17h, len 128) forward & fused sdpa & 0.066 & 54.6 & max abs difference 1.6e-02 \\
+temporal (b16, 17h, len 128) backward & fused sdpa & 0.309 & 71.8 & max abs difference 1.6e-02 \\
+depth (b2048, 8h, len 8) forward & reference & 0.388 & 116.3 &  \\
+depth (b2048, 8h, len 8) backward & reference & 0.995 & 176.3 &  \\
+depth (b2048, 8h, len 8) forward & fused sdpa & 1.132 & 160.8 & max abs difference 1.6e-02 \\
+depth (b2048, 8h, len 8) backward & fused sdpa & 3.791 & 713.3 & max abs difference 1.6e-02 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

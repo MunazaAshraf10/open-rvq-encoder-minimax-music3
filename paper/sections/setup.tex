@@ -1,0 +1,22 @@
+\section{Experimental Setup}
+\label{sec:setup}
+
+\subsection{Dataset}
+
+We issued 4,000 generation requests to the released pipeline (30 flow steps, seed 20260815, 180 s requested per track, 3,772 with lyrics and 228 instrumental); 2,972 of them completed (2,775 with lyrics, 197 instrumental) and form the corpus~\cite{Bghira2026dataset}: 91.84 h of audio, mean length 1 min 51 s, with 79.6\% of tracks ending naturally on the end-of-track code. A fifth of the requests draw a deterministic sampling variant (temperature 0.85 or 1.15 with flow guidance 1.5 or 2.0); the rest use the defaults (temperature 1.0, top-50 sampling, guidance 1.5, flow guidance 1.7). Each track is stored with its audio, the sampled codes, the generator's top-50 ids and logits per frame and codebook (language model for the semantic codebook, depth decoder for the acoustic ones), the condition embeddings, the flow latents, and the chunk stitching table. A deterministic hash of the track assigns 5\% of tracks to a held-out split, so every window of a track lies in one split: 2,837 training records and 135 held-out records. The five held-out records without an exact stitching table (shards 12, 53, 73, 86 and 134) belong to the first generation batch, produced before per-chunk spans were recorded; their exclusion is determined by batch, not by content or by any failure of the encoder, and the same rule removes 178 training records. The training input is the waveform re-encoded through the frozen DAV encoder.
+
+Table~\ref{tab:corpus} describes the content. Prompts are short genre captions, four of which (rock, pop, blues, jazz) cover 88\% of the corpus, so the held-out prompts are almost all also training prompts; lyrics are drawn from a tag-conditioned song source, and 22 of the 135 held-out tracks share their lyrics verbatim with a training track while differing in prompt, seed and sampling. The corpus is therefore narrow in caption space and the held-out split tests generalisation across generations, not across musical styles.
+
+\input{tables/corpus}
+
+\subsection{Evaluation metrics}
+
+Evaluation uses the 130 exact-alignment held-out tracks, 2,768 deterministic 128-frame windows. \emph{Token agreement}: top-1 and top-5 inclusion of the sampled code, per codebook and pooled over the seven acoustic books; models with a depth decoder are scored free-running (greedy feedback, the inference condition) and teacher-forced. \emph{Condition-replay cosine}: the encoder's free-running codes are teacher-forced through the official language model and depth decoder, the hidden states pass through the official condition encoder with the recorded stitching, and the result is compared with the stored condition embedding, mean cosine over frames, then over tracks. True sampled codes replayed the same way score 0.9999 and are the control. The replay metric stops before the diffusion transformer; it is not a waveform or listening score, and its floor is not calibrated here: no score for random, shuffled or partially correct code tuples was available through the official path (Sec.~\ref{sec:limitations}). Every architecture was trained once, with seed 42, so differences of the order of the bootstrap intervals in Tab.~\ref{tab:bootstrap} are not interpreted.
+
+\subsection{Baselines}
+
+The external baseline is the community encoder of Serveurperso~\cite{serveurperso2026encoder}, a 41M model trained independently on a separate 550-track corpus with its own alignment and evaluation stack, scored under our protocol. Within our family, v1 is the size-matched baseline for that encoder and each of v2, v3 and v4 is the baseline for the next.
+
+\subsection{Implementation details}
+
+All runs use 4 L40S GPUs, batch 16 per rank, 20 epochs (17,660 optimizer steps), learning rate $3\times 10^{-4}$, weight decay 0.01, gradient norm clipped at 1.0, bfloat16 autocast~\cite{micikevicius2018mixed}, random 128-frame crops and seed 42. v1 used a cosine schedule of half period 500 that reheats fully every 1,000 steps~\cite{loshchilov2017sgdr}; v2 to v4 used 500 steps of linear warm-up followed by linear decay to $10^{-7}$. v3 added a training-only cosine alignment term between the layer-4 hidden state and layer 9 of a frozen MERT~\cite{li2024mert} model, weighted 0.5 until 70\% of training and annealed to zero by 90\%; its projection is not exported, so v2 and v3 share an architecture. The supplementary material (Sec.~\ref{app:hyper}) lists every hyperparameter.

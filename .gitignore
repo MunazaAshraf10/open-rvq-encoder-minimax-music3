@@ -44,9 +44,4 @@ wandb/
 paper/*.log
 paper/_build/
 
-# benchmark data, evaluation results and the paper stay local
-benchmarks/
-results/
-paper/
-docs/
-*.pdf
+EDM.pdf

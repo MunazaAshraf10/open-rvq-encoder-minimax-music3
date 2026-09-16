@@ -1,0 +1,24 @@
+\begin{table}[tb]
+\centering
+\small
+\caption{Benchmark suite: pooling.}
+\label{tab:bench_pooling}
+\adjustbox{max width=\columnwidth}{
+\begin{tabular}{lrrrr}
+\toprule
+Case & Variant & ms & Peak MiB & Note \\
+\midrule
+b16 x 128 frames x 441 latents x 1088 & dense bmm & 0.122 & 55.0 &  \\
+b16 x 128 frames x 441 latents x 1088 & segment mean & 0.124 & 63.6 & max abs difference 1.5e-03 \\
+b64 x 128 frames x 441 latents x 1088 & dense bmm & 0.353 & 168.7 &  \\
+b64 x 128 frames x 441 latents x 1088 & segment mean & 0.375 & 203.0 & max abs difference 1.6e-03 \\
+b16 x 512 frames x 1765 latents x 1088 & dense bmm & 1.219 & 171.9 &  \\
+b16 x 512 frames x 1765 latents x 1088 & segment mean & 0.373 & 206.0 & max abs difference 1.5e-03 \\
+collate b16 x 128 frames x 441 latents & dense matrix & 19.808 & 0.0 & 903,168 elements built per batch \\
+collate b16 x 128 frames x 441 latents & segment index & 1.757 & 0.0 & 7,056 elements built per batch \\
+collate b64 x 128 frames x 441 latents & dense matrix & 152.901 & 0.0 & 3,612,672 elements built per batch \\
+collate b64 x 128 frames x 441 latents & segment index & 8.458 & 0.0 & 28,224 elements built per batch \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

@@ -1,0 +1,15 @@
+\begin{table}[tb]
+\centering
+\small
+\caption{Benchmark suite: training.}
+\label{tab:bench_training}
+\adjustbox{max width=\columnwidth}{
+\begin{tabular}{lrrrrr}
+\toprule
+Case & Variant & ms & Peak MiB & frames/s & Note \\
+\midrule
+v4 169M single GPU (64 windows per step) & batch 16 x accumulation 4 & 395.545 & 5467.0 & 20,710.7 & 1.9 h for the published 17,660 steps \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

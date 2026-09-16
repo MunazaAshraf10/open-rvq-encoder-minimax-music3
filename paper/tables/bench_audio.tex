@@ -1,0 +1,23 @@
+\begin{table}[tb]
+\centering
+\small
+\caption{Benchmark suite: audio.}
+\label{tab:bench_audio}
+\adjustbox{max width=\columnwidth}{
+\begin{tabular}{lrrrrr}
+\toprule
+Case & Variant & ms & Peak MiB & x real time & Note \\
+\midrule
+30 s stereo track & dav encoder & 344.614 & 4005.8 & 87.1 &  \\
+30 s stereo track & rvq encoder & 100.004 & 818.2 & 300.0 &  \\
+30 s stereo track & end to end & 398.878 & 4005.8 & 75.2 &  \\
+180 s stereo track & dav encoder & 2214.803 & 4332.6 & 81.3 &  \\
+180 s stereo track & rvq encoder & 652.836 & 824.2 & 275.7 &  \\
+180 s stereo track & end to end & 2803.223 & 4332.6 & 64.2 &  \\
+360 s stereo track & dav encoder & 4448.245 & 4475.7 & 80.9 &  \\
+360 s stereo track & rvq encoder & 1239.706 & 832.2 & 290.4 &  \\
+360 s stereo track & end to end & 5601.924 & 4475.7 & 64.3 &  \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

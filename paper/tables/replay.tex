@@ -1,0 +1,20 @@
+\begin{table}[tb]
+\centering
+\small
+\caption{Condition-replay cosine on the 130 exact-alignment held-out tracks.}
+\label{tab:replay}
+\adjustbox{max width=\columnwidth}{
+\begin{tabular}{lrrrrr}
+\toprule
+Model & Parameters & Mean & Std & 5th pct & 95th pct \\
+\midrule
+Serveurperso v1 (community) & 40,978,944 & 0.6633 & 0.0222 & 0.6281 & 0.6963 \\
+v1, 41M & 40,978,944 & 0.7624 & 0.0195 & 0.7345 & 0.7904 \\
+v2, 155M & 154,736,064 & 0.7698 & 0.0191 & 0.7430 & 0.7986 \\
+v3, 155M + MERT & 154,736,064 & 0.7703 & 0.0193 & 0.7416 & 0.8005 \\
+v4, 169M + depth & 169,008,576 & 0.8748 & 0.0157 & 0.8453 & 0.8938 \\
+true codes (control) &  & 0.9999 & 0.0002 & 0.9998 & 1.0000 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

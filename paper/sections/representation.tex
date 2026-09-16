@@ -1,0 +1,23 @@
+\section{MiniMax Music 3 Audio Representation}
+\label{sec:representation}
+
+\begin{figure*}[t]
+  \centering
+  \resizebox{0.95\textwidth}{!}{\input{figures/timeline}}
+  \caption{The stitched timeline. Rollout chunks of 200 frames at a 100-frame hop; each chunk after the first owns its frames from local index 25; latents are stitched with a hop of 345, so a frame owns three or four latents and the boundaries follow Eq.~\ref{eq:nominal}.}
+  \label{fig:timeline}
+\end{figure*}
+
+\subsection{System interface and observations}
+
+We describe the pipeline as it can be observed from the released weights and inference code. A Qwen3-based language model~\cite{qwen3} consumes a caption and lyrics and emits, per 40 ms frame, a semantic code $c_0 \in \{0,\dots,16383\}$ or an end-of-track symbol (id 16,384). An RVQ depth decoder, a small transformer with a key-value cache over depth, emits seven acoustic codes $c_1,\dots,c_7 \in \{0,\dots,1023\}$ conditioned on the language-model hidden state and the codes below. The language model runs in windows of 200 frames with a hop of 100 frames, so every frame after the first 100 is generated twice, and the later chunk owns a frame from its local index 25 onward. A condition encoder maps the code stream to a conditioning sequence; a flow-matching diffusion transformer renders 128-channel DAV latents at 86.1328125 Hz from that conditioning, chunk by chunk, and the chunks are stitched with a hop of 345 latents; the DAV decoder returns 44.1 kHz stereo audio.
+
+The release contains the language model, the depth decoder, the condition encoder, the diffusion transformer, and the DAV encoder and decoder. It contains neither an audio-to-code path nor the tokenizer that defines the codebooks. A reference recording therefore cannot be expressed in the code space the language model consumes.
+
+\subsection{Initial characterisation}
+
+Three properties of the interface shape everything that follows. The generator exposes, for every track it produces, the sampled codes and a top-50 distribution at every frame and codebook, from the language model for the semantic codebook and from the RVQ depth decoder for the seven acoustic ones, so the inverse map from audio to codes has exact labels and soft targets for free. The code stream at 25 Hz and the latent stream at 86.1328125 Hz stand in a non-integer ratio of $441/128 = 3.4453125$, and the chunked rollout with its integer stitching hop of 345 makes the true correspondence piecewise rather than a fixed stride. And the acoustic codebooks are produced by a decoder that conditions each on the codes below, so the codes of one frame are not independent labels.
+
+\subsection{Research questions}
+
+We ask (i) what the exact correspondence between latent and code timelines is and whether it can be reconstructed without the generator's own stitching tables; (ii) whether an encoder trained only on generated tracks can recover codes that the generator accepts as equivalent to its own; (iii) how much of the acoustic code stream can be predicted at all, given that the same audio admits many compatible code tuples; and (iv) which architectural choice, width, auxiliary alignment, or conditioning across codebook depth, moves the downstream behaviour.

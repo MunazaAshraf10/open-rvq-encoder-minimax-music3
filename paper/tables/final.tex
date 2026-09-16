@@ -1,0 +1,18 @@
+\begin{table}[tb]
+\centering
+\small
+\caption{Packaged checkpoints on the held-out split (percent).}
+\label{tab:final}
+\adjustbox{max width=\columnwidth}{
+\begin{tabular}{lrrrrrrr}
+\toprule
+Model & Checkpoint & Step & Loss & Sem. top-1 & Sem. top-5 & Ac. top-1 & Ac. top-5 \\
+\midrule
+v1, 41M & checkpoint-17500 & 17,500 & 5.3379 & 41.03 & 78.38 & 7.17 & 20.94 \\
+v2, 155M & final & 17,660 & 5.2644 & 42.86 & 80.18 & 7.62 & 21.98 \\
+v3, 155M + MERT & final & 17,660 & 5.2599 & 43.03 & 80.49 & 7.66 & 22.03 \\
+v4, 169M + depth & final & 17,660 & 3.9874 & 43.17 & 80.51 & 7.29 & 19.88 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

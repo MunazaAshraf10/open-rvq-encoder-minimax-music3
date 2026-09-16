@@ -1,0 +1,52 @@
+\section{Reconstructed Audio Encoder}
+\label{sec:encoder}
+
+We train four encoders that share one design and differ in one change each (Tab.~\ref{tab:family}). v1 is the baseline; v2 widens the shared encoder; v3 adds a training-only auxiliary objective to v2; v4 keeps the v2 encoder and replaces the independent acoustic readouts by a decoder that is causal across codebook depth. Every model is trained from scratch; no weights are transferred between versions.
+
+\begin{table}[t]
+\centering\small
+\caption{The four encoders. Parameter counts are those of the released weights.}
+\label{tab:family}
+\adjustbox{max width=\columnwidth}{\begin{tabular}{llrr}
+\toprule
+Model & Change from the previous model & Width & Parameters \\
+\midrule
+v1 & baseline, 7 independent acoustic readouts & 512 & 40,978,944 \\
+v2 & shared encoder widened, 8 to 17 heads & 1,088 & 154,736,064 \\
+v3 & v2 plus training-only MERT alignment & 1,088 & 154,736,064 \\
+v4 & v2 encoder plus causal depth decoder & 1,088 & 169,008,576 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{figure*}[t]
+  \centering
+  \resizebox{0.92\textwidth}{!}{\input{figures/pipeline}}
+  \caption{Waveform to codes. The DAV encoder yields $[L,128]$ latents, pooling yields $[T,d]$ frame features. Grey: frozen and released components. Blue: the encoder trained here. Orange: the official path used only to compute condition-replay cosine.}
+  \label{fig:pipeline}
+\end{figure*}
+
+\subsection{Architecture}
+
+The input is the DAV posterior mean $h \in \mathbb{R}^{L \times 128}$ of a window (Fig.~\ref{fig:pipeline}). A convolutional stem (kernel 7, 128 to $d$ channels) and three residual blocks $x + \mathrm{conv}_1(\mathrm{gelu}(\mathrm{conv}_3(\mathrm{gelu}(\mathrm{GN}_1(x)))))$ with dilations 1, 3 and 9~\cite{yu2016dilated} operate at the latent rate, with GELU activations~\cite{hendrycks2016gelu}. GroupNorm with one group~\cite{wu2018groupnorm} normalises channels and time jointly, so zero-padded latents behave identically in batched and single-window evaluation. Frame features are the mean of the latent features a frame was rendered from,
+\begin{equation}
+  P_{t,l} = \frac{1}{s_{t+1} - s_t} \;\text{ for } l \in [s_t, s_{t+1}),\qquad 0 \text{ otherwise},
+  \label{eq:pool}
+\end{equation}
+so every row of $P$ sums to one; $P$ maps the result to $T \le 128$ frames, learned positions are added, and eight bidirectional pre-norm transformer layers~\cite{vaswani2017attention,xiong2020prenorm} (width $d$, head dimension 64, feed-forward $4d$, dropout 0.1) followed by a LayerNorm~\cite{ba2016layernorm} give frame features $y \in \mathbb{R}^{T \times d}$. The window is 128 frames, 5.12 s, with no state across windows.
+
+\subsection{Quantisation pipeline}
+\label{sec:depth}
+
+The semantic readout maps $y$ to 16,384 logits. v1 to v3 read the seven acoustic codebooks from $y$ with independent linear heads. v4 replaces them with a decoder that is autoregressive across codebook depth and runs once per frame: the sequence $[W_{\mathrm{ctx}} y_t,\, e_0(c_0),\, e_1(c_1),\, \dots,\, e_6(c_6)]$ plus learned depth positions passes through two causal pre-norm layers of width 512 (8 heads, feed-forward 2,048), and head $j$ reads position $j+1$ to predict codebook $j+1$. Codebook $k$ therefore sees the frame context, the semantic code and the codebooks below $k$, and nothing above. Training teacher-forces the sampled codes in one pass; inference feeds back greedy predictions in seven sequential passes, and the argmax of each head is the emitted code. The decoder adds 22.1M parameters to the 147M of the shared encoder and semantic readout.
+
+Let $V_k$ be the size of codebook $k$. With $K = 8$ codebooks, sampled codes $c_{t,k}$, and the stored top-50 ids $i$ and teacher logits $z_T$, the objective is
+\begin{align}
+  \mathcal{L} &= \frac{1}{K}\sum_k \mathrm{CE}_k + w_{\mathrm{KL}} \frac{1}{K}\sum_k \mathrm{KL}_k, \label{eq:loss}\\
+  \mathrm{KL}_k &= \tau^2 \sum_{i \in \mathrm{valid}} p_T(i)\big(\log p_T(i) - \log p_S(i)\big), \nonumber
+\end{align}
+where $p_T = \mathrm{softmax}(z_T / \tau)$ over the valid stored ids, $p_S$ is the student softmax over the whole vocabulary at temperature $\tau$ gathered at those ids, and ids outside $[0, V_k)$, notably the end-of-track id and padding, are dropped before renormalising the teacher~\cite{hinton2015distill}. All models use $w_{\mathrm{KL}} = 0.25$ and $\tau = 1$. For v4 the acoustic terms are teacher-forced, so its loss is conditional and not comparable with v1 to v3.
+
+\subsection{Implementation}
+
+Because each row of $P$ is one contiguous constant block, $P h$ is a segment mean and is computed in $O(L d)$ by scattering each latent into its owning frame and dividing by the span, rather than in $O(T L d)$ as a dense product. Fused scaled dot-product attention~\cite{dao2022flash,dao2024flash2,rabe2021memory} is used in the temporal stack and an unfused kernel in the depth decoder, a choice decided by measurement (Sec.~\ref{sec:results}). All models use maximal update parametrisation~\cite{yang2022mup} with width multiplier $m = d/128$: readouts compute $W(x/m) + b$, attention logits are scaled by $8/d_h$, and matrix-like weights take learning rate $\mathrm{lr}/m$ and weight decay $\mathrm{wd}\cdot m$ under AdamW~\cite{kingma2015adam,loshchilov2019adamw}; biases with a width-sized fan-in and non-zero readouts are scaled by $\sqrt{m}$ at initialisation, and the semantic readout starts at zero. The DAV encoder is evaluated in 30 s segments with 1 s margins, so peak memory is flat for any track length.

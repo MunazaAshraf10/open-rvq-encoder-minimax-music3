@@ -1,0 +1,23 @@
+\begin{table}[tb]
+\centering
+\small
+\caption{Published rows against our implementation on the same held-out split.}
+\label{tab:reproduced}
+\adjustbox{max width=\columnwidth}{
+\begin{tabular}{lrrrrrrr}
+\toprule
+Model & Source & Loss & Sem. top-1 & Sem. top-5 & Ac. top-1 & Ac. top-5 & TF ac. top-1 \\
+\midrule
+v1, 41M & published, bf16, 4 ranks & 5.3379 & 41.03 & 7.17 &  \\
+v1, 41M & this repository, bf16, 1 GPU & 5.3353 & 41.08 & 7.18 &  \\
+v2, 155M & published, bf16, 4 ranks & 5.2644 & 42.86 & 7.62 &  \\
+v2, 155M & this repository, bf16, 1 GPU & 5.2644 & 42.86 & 7.62 &  \\
+v3, 155M + MERT & published, bf16, 4 ranks & 5.2599 & 43.03 & 7.66 &  \\
+v3, 155M + MERT & this repository, bf16, 1 GPU & 5.2574 & 43.07 & 7.67 &  \\
+v4, 169M + depth & published, bf16, 4 ranks & 3.9874 & 43.17 & 7.29 & 18.42 \\
+v4, 169M + depth & this repository, bf16, 1 GPU & 3.9860 & 43.24 & 7.30 & 18.44 \\
+v4, 169M + depth & this repository, fp32, 1 GPU & 3.9858 & 43.26 & 7.30 & 18.44 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

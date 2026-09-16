@@ -1,0 +1,494 @@
+{
+  "environment": {
+    "python": "3.13.15",
+    "torch": "2.14.0+cu130",
+    "device": "cuda",
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "compute_capability": "8.6",
+    "memory_gib": 23.6,
+    "cuda": "13.0",
+    "driver": "580.173.02"
+  },
+  "results": [
+    {
+      "suite": "attention",
+      "case": "temporal (b16, 17h, len 128) forward",
+      "variant": "reference",
+      "milliseconds": 0.2380800023674965,
+      "memory": 73.87548828125,
+      "throughput": 0.0,
+      "units": "",
+      "note": ""
+    },
+    {
+      "suite": "attention",
+      "case": "temporal (b16, 17h, len 128) backward",
+      "variant": "reference",
+      "milliseconds": 0.8795839846134186,
+      "memory": 118.00146484375,
+      "throughput": 0.0,
+      "units": "",
+      "note": ""
+    },
+    {
+      "suite": "attention",
+      "case": "temporal (b16, 17h, len 128) forward",
+      "variant": "fused sdpa",
+      "milliseconds": 0.0655359998345375,
+      "memory": 54.63427734375,
+      "throughput": 0.0,
+      "units": "",
+      "note": "max abs difference 1.6e-02"
+    },
+    {
+      "suite": "attention",
+      "case": "temporal (b16, 17h, len 128) backward",
+      "variant": "fused sdpa",
+      "milliseconds": 0.3091680109500885,
+      "memory": 71.76806640625,
+      "throughput": 0.0,
+      "units": "",
+      "note": "max abs difference 1.6e-02"
+    },
+    {
+      "suite": "attention",
+      "case": "depth (b2048, 8h, len 8) forward",
+      "variant": "reference",
+      "milliseconds": 0.38809600472450256,
+      "memory": 116.2509765625,
+      "throughput": 0.0,
+      "units": "",
+      "note": ""
+    },
+    {
+      "suite": "attention",
+      "case": "depth (b2048, 8h, len 8) backward",
+      "variant": "reference",
+      "milliseconds": 0.9948000013828278,
+      "memory": 176.25146484375,
+      "throughput": 0.0,
+      "units": "",
+      "note": ""
+    },
+    {
+      "suite": "attention",
+      "case": "depth (b2048, 8h, len 8) forward",
+      "variant": "fused sdpa",
+      "milliseconds": 1.1316320300102234,
+      "memory": 160.75146484375,
+      "throughput": 0.0,
+      "units": "",
+      "note": "max abs difference 1.6e-02"
+    },
+    {
+      "suite": "attention",
+      "case": "depth (b2048, 8h, len 8) backward",
+      "variant": "fused sdpa",
+      "milliseconds": 3.790735960006714,
+      "memory": 713.25244140625,
+      "throughput": 0.0,
+      "units": "",
+      "note": "max abs difference 1.6e-02"
+    },
+    {
+      "suite": "pooling",
+      "case": "b16 x 128 frames x 441 latents x 1088",
+      "variant": "dense bmm",
+      "milliseconds": 0.12185599654912949,
+      "memory": 55.02783203125,
+      "throughput": 0.0,
+      "units": "",
+      "note": ""
+    },
+    {
+      "suite": "pooling",
+      "case": "b16 x 128 frames x 441 latents x 1088",
+      "variant": "segment mean",
+      "milliseconds": 0.12396799772977829,
+      "memory": 63.59423828125,
+      "throughput": 0.0,
+      "units": "",
+      "note": "max abs difference 1.5e-03"
+    },
+    {
+      "suite": "pooling",
+      "case": "b64 x 128 frames x 441 latents x 1088",
+      "variant": "dense bmm",
+      "milliseconds": 0.3532800078392029,
+      "memory": 168.71240234375,
+      "throughput": 0.0,
+      "units": "",
+      "note": ""
+    },
+    {
+      "suite": "pooling",
+      "case": "b64 x 128 frames x 441 latents x 1088",
+      "variant": "segment mean",
+      "milliseconds": 0.374783992767334,
+      "memory": 202.97802734375,
+      "throughput": 0.0,
+      "units": "",
+      "note": "max abs difference 1.6e-03"
+    },
+    {
+      "suite": "pooling",
+      "case": "b16 x 512 frames x 1765 latents x 1088",
+      "variant": "dense bmm",
+      "milliseconds": 1.218559980392456,
+      "memory": 171.94482421875,
+      "throughput": 0.0,
+      "units": "",
+      "note": ""
+    },
+    {
+      "suite": "pooling",
+      "case": "b16 x 512 frames x 1765 latents x 1088",
+      "variant": "segment mean",
+      "milliseconds": 0.37273600697517395,
+      "memory": 206.01123046875,
+      "throughput": 0.0,
+      "units": "",
+      "note": "max abs difference 1.5e-03"
+    },
+    {
+      "suite": "pooling",
+      "case": "collate b16 x 128 frames x 441 latents",
+      "variant": "dense matrix",
+      "milliseconds": 19.807972479611635,
+      "memory": 0.0,
+      "throughput": 0.0,
+      "units": "",
+      "note": "903,168 elements built per batch"
+    },
+    {
+      "suite": "pooling",
+      "case": "collate b16 x 128 frames x 441 latents",
+      "variant": "segment index",
+      "milliseconds": 1.756721641868353,
+      "memory": 0.0,
+      "throughput": 0.0,
+      "units": "",
+      "note": "7,056 elements built per batch"
+    },
+    {
+      "suite": "pooling",
+      "case": "collate b64 x 128 frames x 441 latents",
+      "variant": "dense matrix",
+      "milliseconds": 152.90054201614112,
+      "memory": 0.0,
+      "throughput": 0.0,
+      "units": "",
+      "note": "3,612,672 elements built per batch"
+    },
+    {
+      "suite": "pooling",
+      "case": "collate b64 x 128 frames x 441 latents",
+      "variant": "segment index",
+      "milliseconds": 8.458244614303112,
+      "memory": 0.0,
+      "throughput": 0.0,
+      "units": "",
+      "note": "28,224 elements built per batch"
+    },
+    {
+      "suite": "encoder",
+      "case": "v1 41M batch 8",
+      "variant": "forward, teacher forced",
+      "milliseconds": 5.1065919399261475,
+      "memory": 306.1630859375,
+      "throughput": 200525.12753051682,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v1 41M batch 8",
+      "variant": "forward and backward",
+      "milliseconds": 22.46553611755371,
+      "memory": 856.8896484375,
+      "throughput": 45580.928700823904,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v1 41M batch 8",
+      "variant": "forward and backward, checkpointed",
+      "milliseconds": 41.22878456115723,
+      "memory": 689.7919921875,
+      "throughput": 24837.016441293265,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v1 41M batch 16",
+      "variant": "forward, teacher forced",
+      "milliseconds": 7.805391788482666,
+      "memory": 522.49267578125,
+      "throughput": 262382.7292080264,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v1 41M batch 16",
+      "variant": "forward and backward",
+      "milliseconds": 27.72531223297119,
+      "memory": 1302.84814453125,
+      "throughput": 73867.51798468476,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v1 41M batch 16",
+      "variant": "forward and backward, checkpointed",
+      "milliseconds": 41.53036689758301,
+      "memory": 966.52783203125,
+      "throughput": 49313.313437623154,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v1 41M batch 32",
+      "variant": "forward, teacher forced",
+      "milliseconds": 13.159424304962158,
+      "memory": 625.89794921875,
+      "throughput": 311259.8169249304,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v1 41M batch 32",
+      "variant": "forward and backward",
+      "milliseconds": 44.045310974121094,
+      "memory": 2344.0986328125,
+      "throughput": 92995.1431698737,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v1 41M batch 32",
+      "variant": "forward and backward, checkpointed",
+      "milliseconds": 50.68894386291504,
+      "memory": 1621.2783203125,
+      "throughput": 80806.57610616955,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v4 169M batch 8",
+      "variant": "forward, teacher forced",
+      "milliseconds": 15.474255561828613,
+      "memory": 1147.927734375,
+      "throughput": 66174.42731952609,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v4 169M batch 8",
+      "variant": "forward and backward",
+      "milliseconds": 48.36497688293457,
+      "memory": 2781.93896484375,
+      "throughput": 21172.345486250302,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v4 169M batch 8",
+      "variant": "forward and backward, checkpointed",
+      "milliseconds": 60.78455924987793,
+      "memory": 2405.79052734375,
+      "throughput": 16846.383565774664,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v4 169M batch 16",
+      "variant": "forward, teacher forced",
+      "milliseconds": 27.004799842834473,
+      "memory": 1985.4111328125,
+      "throughput": 75838.36991642884,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v4 169M batch 16",
+      "variant": "forward and backward",
+      "milliseconds": 84.4716796875,
+      "memory": 3928.4345703125,
+      "throughput": 24244.81207875236,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v4 169M batch 16",
+      "variant": "forward and backward, checkpointed",
+      "milliseconds": 96.10956954956055,
+      "memory": 3185.4287109375,
+      "throughput": 21309.01230333691,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v4 169M batch 32",
+      "variant": "forward, teacher forced",
+      "milliseconds": 49.63633728027344,
+      "memory": 2344.6015625,
+      "throughput": 82520.19033700618,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v4 169M batch 32",
+      "variant": "forward and backward",
+      "milliseconds": 156.05299377441406,
+      "memory": 6172.51171875,
+      "throughput": 26247.493886090168,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "encoder",
+      "case": "v4 169M batch 32",
+      "variant": "forward and backward, checkpointed",
+      "milliseconds": 177.3895721435547,
+      "memory": 4725.78515625,
+      "throughput": 23090.421553558186,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "depth decoder",
+      "case": "v4 169M batch 16 x 128 frames",
+      "variant": "teacher forced",
+      "milliseconds": 7.413248062133789,
+      "memory": 977.03515625,
+      "throughput": 276262.17048651073,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "depth decoder",
+      "case": "v4 169M batch 16 x 128 frames",
+      "variant": "free running",
+      "milliseconds": 30.582271575927734,
+      "memory": 1037.0478515625,
+      "throughput": 66966.90253748336,
+      "units": "frames/s",
+      "note": ""
+    },
+    {
+      "suite": "training",
+      "case": "v4 169M single GPU (64 windows per step)",
+      "variant": "batch 16 x accumulation 4",
+      "milliseconds": 395.54502868652344,
+      "memory": 5466.99755859375,
+      "throughput": 20710.66352977048,
+      "units": "frames/s",
+      "note": "1.9 h for the published 17,660 steps"
+    },
+    {
+      "suite": "audio",
+      "case": "30 s stereo track",
+      "variant": "dav encoder",
+      "milliseconds": 344.6138916015625,
+      "memory": 4005.82275390625,
+      "throughput": 87.05394858163628,
+      "units": "x real time",
+      "note": ""
+    },
+    {
+      "suite": "audio",
+      "case": "30 s stereo track",
+      "variant": "rvq encoder",
+      "milliseconds": 100.00447845458984,
+      "memory": 818.1826171875,
+      "throughput": 299.9865652379002,
+      "units": "x real time",
+      "note": ""
+    },
+    {
+      "suite": "audio",
+      "case": "30 s stereo track",
+      "variant": "end to end",
+      "milliseconds": 398.8775634765625,
+      "memory": 4005.82275390625,
+      "throughput": 75.21104907110866,
+      "units": "x real time",
+      "note": ""
+    },
+    {
+      "suite": "audio",
+      "case": "180 s stereo track",
+      "variant": "dav encoder",
+      "milliseconds": 2214.803466796875,
+      "memory": 4332.642578125,
+      "throughput": 81.27131941883864,
+      "units": "x real time",
+      "note": ""
+    },
+    {
+      "suite": "audio",
+      "case": "180 s stereo track",
+      "variant": "rvq encoder",
+      "milliseconds": 652.8358154296875,
+      "memory": 824.2294921875,
+      "throughput": 275.7201669175067,
+      "units": "x real time",
+      "note": ""
+    },
+    {
+      "suite": "audio",
+      "case": "180 s stereo track",
+      "variant": "end to end",
+      "milliseconds": 2803.22265625,
+      "memory": 4332.642578125,
+      "throughput": 64.21180978923533,
+      "units": "x real time",
+      "note": ""
+    },
+    {
+      "suite": "audio",
+      "case": "360 s stereo track",
+      "variant": "dav encoder",
+      "milliseconds": 4448.24462890625,
+      "memory": 4475.712890625,
+      "throughput": 80.9308008063662,
+      "units": "x real time",
+      "note": ""
+    },
+    {
+      "suite": "audio",
+      "case": "360 s stereo track",
+      "variant": "rvq encoder",
+      "milliseconds": 1239.7059326171875,
+      "memory": 832.2099609375,
+      "throughput": 290.3914473007249,
+      "units": "x real time",
+      "note": ""
+    },
+    {
+      "suite": "audio",
+      "case": "360 s stereo track",
+      "variant": "end to end",
+      "milliseconds": 5601.923828125,
+      "memory": 4475.712890625,
+      "throughput": 64.26363710848499,
+      "units": "x real time",
+      "note": ""
+    }
+  ]
+}

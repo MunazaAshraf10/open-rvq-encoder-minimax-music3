@@ -1,0 +1,32 @@
+\begin{table}[tb]
+\centering
+\small
+\caption{Benchmark suite: encoder.}
+\label{tab:bench_encoder}
+\adjustbox{max width=\columnwidth}{
+\begin{tabular}{lrrrrr}
+\toprule
+Case & Variant & ms & Peak MiB & frames/s & Note \\
+\midrule
+v1 41M batch 8 & forward, teacher forced & 5.107 & 306.2 & 200,525.1 &  \\
+v1 41M batch 8 & forward and backward & 22.466 & 856.9 & 45,580.9 &  \\
+v1 41M batch 8 & forward and backward, checkpointed & 41.229 & 689.8 & 24,837.0 &  \\
+v1 41M batch 16 & forward, teacher forced & 7.805 & 522.5 & 262,382.7 &  \\
+v1 41M batch 16 & forward and backward & 27.725 & 1302.8 & 73,867.5 &  \\
+v1 41M batch 16 & forward and backward, checkpointed & 41.530 & 966.5 & 49,313.3 &  \\
+v1 41M batch 32 & forward, teacher forced & 13.159 & 625.9 & 311,259.8 &  \\
+v1 41M batch 32 & forward and backward & 44.045 & 2344.1 & 92,995.1 &  \\
+v1 41M batch 32 & forward and backward, checkpointed & 50.689 & 1621.3 & 80,806.6 &  \\
+v4 169M batch 8 & forward, teacher forced & 15.474 & 1147.9 & 66,174.4 &  \\
+v4 169M batch 8 & forward and backward & 48.365 & 2781.9 & 21,172.3 &  \\
+v4 169M batch 8 & forward and backward, checkpointed & 60.785 & 2405.8 & 16,846.4 &  \\
+v4 169M batch 16 & forward, teacher forced & 27.005 & 1985.4 & 75,838.4 &  \\
+v4 169M batch 16 & forward and backward & 84.472 & 3928.4 & 24,244.8 &  \\
+v4 169M batch 16 & forward and backward, checkpointed & 96.110 & 3185.4 & 21,309.0 &  \\
+v4 169M batch 32 & forward, teacher forced & 49.636 & 2344.6 & 82,520.2 &  \\
+v4 169M batch 32 & forward and backward & 156.053 & 6172.5 & 26,247.5 &  \\
+v4 169M batch 32 & forward and backward, checkpointed & 177.390 & 4725.8 & 23,090.4 &  \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

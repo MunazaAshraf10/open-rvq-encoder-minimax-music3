@@ -1,0 +1,20 @@
+\begin{tikzpicture}[x=0.5mm,y=1mm,font=\footnotesize]
+  \foreach \c/\y/\col in {0/22/blue!20,1/15/orange!25,2/8/blue!20}{
+    \pgfmathtruncatemacro{\s}{\c*100}
+    \pgfmathtruncatemacro{\e}{\s+200}
+    \draw[fill=\col,draw=black!60] (\s,\y) rectangle (\e,\y+5);
+    \node[anchor=west,text=black!70] at (\e+4,\y+2.5) {rollout chunk \c: frames $[\s,\e)$};
+  }
+  \draw[fill=black!35,draw=black!70] (0,22) rectangle (125,27);
+  \draw[fill=black!35,draw=black!70] (125,15) rectangle (225,20);
+  \draw[fill=black!35,draw=black!70] (225,8) rectangle (400,13);
+  \node[text=white] at (62,24.5) {owns $[0,125)$};
+  \node[text=white] at (175,17.5) {owns $[125,225)$};
+  \node[text=white] at (312,10.5) {owns $[225,400)$};
+  \draw[-{Latex[length=1.5mm]}] (0,3) -- (430,3) node[anchor=west]{frames, 25 Hz};
+  \foreach \f in {0,100,200,300,400}{\draw (\f,2.3) -- (\f,3.7); \node[anchor=north] at (\f,2.2) {\f};}
+  \draw[-{Latex[length=1.5mm]}] (0,-6) -- (430,-6) node[anchor=west]{stitched latents, 86.13 Hz};
+  \foreach \f/\l in {0/0,100/345,200/690,300/1035,400/1380}{\draw (\f,-6.7) -- (\f,-5.3); \node[anchor=north] at (\f,-6.8) {\l};}
+  \foreach \f in {100,200,300}{\draw[black!40,dashed] (\f,3) -- (\f,-6);}
+  \node[anchor=west,text=black!70] at (0,-13) {$s_{100c} = 345c$; inside a chunk of $cf$ frames and $cl = \lfloor cf \cdot 441/128 \rfloor$ latents, $s_f = 345c + \lceil lf \cdot cl / cf \rceil$; each frame owns 3 or 4 latents};
+\end{tikzpicture}

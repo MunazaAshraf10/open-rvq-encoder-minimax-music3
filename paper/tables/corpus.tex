@@ -1,0 +1,23 @@
+\begin{table}[tb]
+\centering
+\small
+\caption{Content statistics of the reverse-distillation corpus.}
+\label{tab:corpus}
+\adjustbox{max width=\columnwidth}{
+\begin{tabular}{lr}
+\toprule
+Statistic & Value \\
+\midrule
+tracks (train / held-out) & 2,972 (2,837 / 135) \\
+with exact stitching table (train / held-out) & 2,659 / 130 \\
+lyric-bearing / instrumental & 2,775 / 197 \\
+distinct prompts & 307 \\
+four most frequent prompts & rock (705), pop (658), blues (622), jazz (620) \\
+prompt length in words, median (max) & 1 (187) \\
+lyric length in lines, median (mean) & 33 (35.5) \\
+held-out prompts also used in train & 124 of 135 \\
+held-out lyrics identical to a training track & 22 of 135 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}

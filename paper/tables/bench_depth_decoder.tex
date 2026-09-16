@@ -1,0 +1,16 @@
+\begin{table}[tb]
+\centering
+\small
+\caption{Benchmark suite: depth decoder.}
+\label{tab:bench_depth_decoder}
+\adjustbox{max width=\columnwidth}{
+\begin{tabular}{lrrrrr}
+\toprule
+Case & Variant & ms & Peak MiB & frames/s & Note \\
+\midrule
+v4 169M batch 16 x 128 frames & teacher forced & 7.413 & 977.0 & 276,262.2 &  \\
+v4 169M batch 16 x 128 frames & free running & 30.582 & 1037.0 & 66,966.9 &  \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
